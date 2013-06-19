@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+          package="com.koushikdutta.test"
+          android:versionCode="1"
+          android:versionName="1.0">
+
+    <uses-sdk android:minSdkVersion="17"/>
+
+    <uses-permission android:name="com.google.android.c2dm.permission.RECEIVE" />
+
+
+    <permission android:name="com.koushikdutta.test.permission.C2D_MESSAGE"
+                android:protectionLevel="signature" />
+    <uses-permission android:name="com.koushikdutta.test.permission.C2D_MESSAGE" />
+
+    <uses-permission android:name="android.permission.SEND_SMS" />
+    <uses-permission android:name="android.permission.RECEIVE_SMS" />
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <application
+            android:label="@string/app_name"
+            android:icon="@drawable/ic_launcher">
+        <receiver android:name=".SmsReceiver">
+            <intent-filter>
+                <action android:name="android.intent.action.DATA_SMS_RECEIVED" />
+                <data android:scheme="sms" />
+                <data android:host="localhost" />
+                <data android:port="@string/sms_port" /><!-- this number should be the same as the `myApplicationPort` from above!!! -->
+            </intent-filter>
+        </receiver>
+
+        <receiver
+                android:name=".GcmBroadcastReceiver"
+                android:permission="com.google.android.c2dm.permission.SEND" >
+            <intent-filter>
+                <action android:name="com.google.android.c2dm.intent.RECEIVE" />
+                <category android:name="com.koushikdutta.test" />
+            </intent-filter>
+        </receiver>
+
+        <service android:name=".Service" />
+        <activity
+                android:name="MyActivity"
+                android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>
