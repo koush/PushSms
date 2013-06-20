@@ -10,6 +10,7 @@ import android.telephony.PhoneNumberUtils;
 import android.telephony.SmsManager;
 import android.telephony.SmsMessage;
 import android.util.Log;
+import android.widget.Toast;
 
 import com.android.internal.telephony.ISms;
 import com.android.internal.telephony.ISmsMiddleware;
@@ -166,6 +167,12 @@ public class Service extends android.app.Service {
                     }
 
                     Log.i(LOGTAG, "registration exchange succeeded");
+                    handler.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            Toast.makeText(Service.this, "GCM Sms sent to " + sendText.destAddr, Toast.LENGTH_SHORT).show();
+                        }
+                    });
                     sendText.send(Service.this, result, sentIntents, deliveryIntents);
                 }
             });
@@ -245,6 +252,7 @@ public class Service extends android.app.Service {
         }
 
         // complete!
+        Toast.makeText(this, "GCM Sms with " + message.getOriginatingAddress() + " enabled", Toast.LENGTH_SHORT).show();
         registration.setComplete(fullRegistration);
         registry.register(message.getOriginatingAddress(), fullRegistration);
     }
@@ -291,8 +299,10 @@ public class Service extends android.app.Service {
                 try {
                     String data = intent.getStringExtra("bencoded");
                     GcmText gcmText = GcmText.parse(data);
-                    if (gcmText != null)
+                    if (gcmText != null) {
+                        Toast.makeText(this, "GCM Sms from " + gcmText.destAddr + " received", Toast.LENGTH_SHORT).show();
                         smsTransport.synthesizeMessages(gcmText.destAddr, gcmText.scAddr, gcmText.texts, System.currentTimeMillis());
+                    }
                 }
                 catch (Exception e) {
                     e.printStackTrace();
