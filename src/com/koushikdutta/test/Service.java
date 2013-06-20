@@ -16,10 +16,8 @@ import com.android.internal.telephony.ISmsMiddleware;
 import com.google.android.gms.gcm.GoogleCloudMessaging;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
 import com.google.gson.JsonPrimitive;
 import com.koushikdutta.async.future.FutureCallback;
-import com.koushikdutta.async.future.SimpleFuture;
 import com.koushikdutta.ion.Ion;
 import com.koushikdutta.test.bencode.BEncodedDictionary;
 
@@ -28,7 +26,6 @@ import org.json.JSONObject;
 import java.io.IOException;
 import java.lang.reflect.Method;
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
 import java.util.Hashtable;
 import java.util.List;
 
