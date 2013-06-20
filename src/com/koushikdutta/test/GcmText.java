@@ -16,6 +16,7 @@ import com.koushikdutta.test.bencode.BEncodedList;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.List;
 
 class GcmText {
     private static final String LOGTAG = "GCMSms";
@@ -46,7 +47,7 @@ class GcmText {
         }
     }
 
-    public void send(Context context, String registration, final PendingIntent sentIntent, final PendingIntent deliveryIntent) {
+    public void send(Context context, String registration, final List<PendingIntent> sentIntents, final List<PendingIntent> deliveryIntents) {
         assert registration != null;
 
         JsonObject payload = new JsonObject();
@@ -77,9 +78,11 @@ class GcmText {
                     @Override
                     public void onCompleted(Exception e, String result) {
                         Log.i(LOGTAG, "Response from GCM send: " + result);
-                        if (sentIntent != null) {
+                        if (sentIntents != null) {
                             try {
-                                sentIntent.send();
+                                for (PendingIntent sentIntent: sentIntents) {
+                                    sentIntent.send();
+                                }
                             } catch (Exception ex) {
                                 ex.printStackTrace();
                             }

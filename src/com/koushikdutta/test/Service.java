@@ -24,6 +24,7 @@ import org.json.JSONObject;
 import java.io.IOException;
 import java.lang.reflect.Method;
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.Hashtable;
 import java.util.List;
 
@@ -105,15 +106,33 @@ public class Service extends android.app.Service {
 
     ISmsMiddleware.Stub stub = new ISmsMiddleware.Stub() {
         @Override
-        public boolean onSendText(String destAddr, String scAddr, String text, final PendingIntent sentIntent, final PendingIntent deliveryIntent) throws RemoteException {
-            Log.i(LOGTAG, "Intercepted text: " + text);
+        public boolean onSendText(String destAddr, String scAddr, String text, PendingIntent sentIntent, PendingIntent deliveryIntent) throws RemoteException {
+            List<PendingIntent> sentIntents = null;
+            List<PendingIntent> deliveryIntents = null;
+            if (sentIntent != null) {
+                sentIntents = new ArrayList<PendingIntent>();
+                sentIntents.add(sentIntent);
+            }
+            if (deliveryIntent != null) {
+                deliveryIntents = new ArrayList<PendingIntent>();
+                deliveryIntents.add(deliveryIntent);
+            }
 
+            ArrayList<String> texts = new ArrayList<String>();
+            texts.add(text);
+            return onSendMultipartText(destAddr, scAddr, texts, sentIntents, deliveryIntents);
+        }
+
+        @Override
+        public boolean onSendMultipartText(String destAddr, String scAddr, List<String> texts, final List<PendingIntent> sentIntents, final List<PendingIntent> deliveryIntents) throws RemoteException {
             RegistrationFuture registration = findRegistration(destAddr);
+            if (registration == NOT_SUPPORTED)
+                return false;
 
             final GcmText sendText = new GcmText();
             sendText.destAddr = destAddr;
             sendText.scAddr = scAddr;
-            sendText.texts.add(text);
+            sendText.texts.addAll(texts);
             if (registration == null) {
                 final RegistrationFuture future = registration = new RegistrationFuture();
                 numberToRegistration.put(destAddr, registration);
@@ -146,19 +165,11 @@ public class Service extends android.app.Service {
                     }
 
                     Log.i(LOGTAG, "registration exchange succeeded");
-                    sendText.send(Service.this, result, sentIntent, deliveryIntent);
+                    sendText.send(Service.this, result, sentIntents, deliveryIntents);
                 }
             });
 
             return true;
-        }
-
-        @Override
-        public boolean onSendMultipartText(String destinationAddress, String scAddress, List<String> parts, List<PendingIntent> sentIntents, List<PendingIntent> deliveryIntents) throws RemoteException {
-            for (String text: parts) {
-                Log.i(LOGTAG, "Intercepted text: " + text);
-            }
-            return false;
         }
     };
 
