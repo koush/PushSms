@@ -5,26 +5,48 @@ import android.content.Context;
 import android.util.Log;
 
 import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import com.google.gson.JsonPrimitive;
 import com.koushikdutta.async.future.FutureCallback;
 import com.koushikdutta.ion.Ion;
+import com.koushikdutta.test.bencode.BEncodedDictionary;
+import com.koushikdutta.test.bencode.BEncodedList;
 
-class SendText {
+import java.nio.ByteBuffer;
+import java.util.ArrayList;
+
+class GcmText {
     private static final String LOGTAG = "GCMSms";
-    Context context;
     String destAddr;
     String scAddr;
-    String text;
-    PendingIntent sentIntent;
-    PendingIntent deliveryIntent;
-    String registration;
+    ArrayList<String> texts = new ArrayList<String>();
 
     public void manageFailure() {
 
     }
 
-    public void send() {
+    public static GcmText parse(String data) {
+        try {
+            BEncodedDictionary bencoded = BEncodedDictionary.parseDictionary(ByteBuffer.wrap(data.getBytes()));
+
+            GcmText ret = new GcmText();
+            ret.destAddr = bencoded.getString("destAddr");
+            ret.scAddr = bencoded.getString("scAddr");
+            BEncodedList texts = bencoded.getBEncodedList("texts");
+            for (int i = 0; i < texts.size(); i++) {
+                ret.texts.add(texts.getString(i));
+            }
+
+            return ret;
+        }
+        catch (Exception e) {
+            return null;
+        }
+    }
+
+    public void send(Context context, String registration, final PendingIntent sentIntent, final PendingIntent deliveryIntent) {
         assert registration != null;
 
         JsonObject payload = new JsonObject();
@@ -34,11 +56,17 @@ class SendText {
         JsonObject data = new JsonObject();
         payload.add("data", data);
 
-        JsonObject json = new JsonObject();
-        json.addProperty("destAddr", destAddr);
-        json.addProperty("scAddr", scAddr);
-        json.addProperty("text", text);
-        data.addProperty("json", json.toString());
+        BEncodedDictionary bencoded = new BEncodedDictionary();
+        bencoded.put("destAddr", destAddr);
+        if (scAddr != null)
+            bencoded.put("scAddr", scAddr);
+        BEncodedList texts = new BEncodedList();
+        bencoded.put("texts", texts);
+        for (String text: this.texts) {
+            texts.add(text);
+        }
+
+        data.addProperty("bencoded", new String(bencoded.toByteArray()));
 
         Ion.with(context)
                 .load("https://android.googleapis.com/gcm/send")

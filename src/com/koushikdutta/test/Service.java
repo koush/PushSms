@@ -14,11 +14,9 @@ import android.util.Log;
 import com.android.internal.telephony.ISms;
 import com.android.internal.telephony.ISmsMiddleware;
 import com.google.android.gms.gcm.GoogleCloudMessaging;
-import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
-import com.google.gson.JsonPrimitive;
+import com.google.gson.JsonParser;
 import com.koushikdutta.async.future.FutureCallback;
-import com.koushikdutta.ion.Ion;
 import com.koushikdutta.test.bencode.BEncodedDictionary;
 
 import org.json.JSONObject;
@@ -41,65 +39,54 @@ public class Service extends android.app.Service {
     };
 
     private final Handler handler = new Handler();
+    private Hashtable<String, RegistrationFuture> numberToRegistration = new Hashtable<String, RegistrationFuture>();
+    private short smsPort;
+    private String registrationId;
+    private GoogleCloudMessaging gcm;
+    private ISms smsTransport;
 
-    Hashtable<String, RegistrationFuture> numberToRegistration = new Hashtable<String, RegistrationFuture>();
-
-    short port;
-    String registrationId;
-    GoogleCloudMessaging gcm;
-    @Override
-    public void onCreate() {
-        super.onCreate();
-
-        port = Short.valueOf(getString(R.string.sms_port));
-
-        try {
-            Class sm = Class.forName("android.os.ServiceManager");
-            Method getService = sm.getMethod("getService", String.class);
-            ISms transport = ISms.Stub.asInterface((IBinder)getService.invoke(null, "isms"));
-            transport.registerSmsMiddleware("interceptor", stub);
-
-            transport.synthesizeMessage("2064228017", "injector", "hello world", System.currentTimeMillis());
-        }
-        catch (Exception e) {
-            Log.e(LOGTAG, "register error", e);
-        }
-
+    private void registerGcm() {
         new Thread() {
             @Override
             public void run() {
                 gcm = GoogleCloudMessaging.getInstance(Service.this);
                 try {
                     registrationId = gcm.register("960629859371");
+
+                    RegistrationFuture future = new RegistrationFuture();
+                    future.setComplete(registrationId);
+                    numberToRegistration.put("2064951490", future);
                 } catch (IOException e) {
                     e.printStackTrace();
                 }
                 Log.i(LOGTAG, "Registration iD: " + registrationId);
-
-                JsonObject payload = new JsonObject();
-                JsonArray regs = new JsonArray();
-                regs.add(new JsonPrimitive(registrationId));
-                payload.add("registration_ids", regs);
-                JsonObject data = new JsonObject();
-                data.addProperty("json", "foo");
-                payload.add("data", data);
-
-                Ion.with(Service.this)
-                .load("https://android.googleapis.com/gcm/send")
-                .setHeader("Authorization", "key=AIzaSyCa9bXc1ppgNy9yVrBXYuCihLndXTPbQq4")
-                .setJsonObjectBody(payload)
-                .asString().setCallback(new FutureCallback<String>() {
-                    @Override
-                    public void onCompleted(Exception e, String result) {
-                        Log.i(LOGTAG, "Response from GCM send: " + result);
-                    }
-                });
             }
         }.start();
     }
 
-    void sendRegistration(String destAddr, String scAddr, BEncodedDictionary payload) {
+    private void registerSmsMiddleware() {
+        try {
+            Class sm = Class.forName("android.os.ServiceManager");
+            Method getService = sm.getMethod("getService", String.class);
+            smsTransport = ISms.Stub.asInterface((IBinder)getService.invoke(null, "isms"));
+            smsTransport.registerSmsMiddleware("interceptor", stub);
+        }
+        catch (Exception e) {
+            Log.e(LOGTAG, "register error", e);
+        }
+    }
 
+    @Override
+    public void onCreate() {
+        super.onCreate();
+
+        smsPort = Short.valueOf(getString(R.string.sms_port));
+
+        registerGcm();
+        registerSmsMiddleware();
+    }
+
+    void sendRegistration(String destAddr, String scAddr, BEncodedDictionary payload) {
         int partsNeeded = (registrationId.length() / 80) + 1;
         payload.put("rl", partsNeeded);
 
@@ -112,28 +99,21 @@ public class Service extends android.app.Service {
             payload.put("p", i);
 
             byte[] bytes = payload.toByteArray();
-            SmsManager.getDefault().sendDataMessage(destAddr, scAddr, port, bytes, null, null);
+            SmsManager.getDefault().sendDataMessage(destAddr, scAddr, smsPort, bytes, null, null);
         }
     }
 
     ISmsMiddleware.Stub stub = new ISmsMiddleware.Stub() {
         @Override
-        public boolean onSendText(String destAddr, String scAddr, String text, PendingIntent sentIntent, PendingIntent deliveryIntent) throws RemoteException {
+        public boolean onSendText(String destAddr, String scAddr, String text, final PendingIntent sentIntent, final PendingIntent deliveryIntent) throws RemoteException {
             Log.i(LOGTAG, "Intercepted text: " + text);
 
-            RegistrationFuture registration;
-            if ((registration = numberToRegistration.get(destAddr)) == NOT_SUPPORTED) {
-                Log.i(LOGTAG, "Number does not support gcm protocol");
-                return false;
-            }
+            RegistrationFuture registration = findRegistration(destAddr);
 
-            final SendText sendText = new SendText();
-            sendText.context = Service.this;
+            final GcmText sendText = new GcmText();
             sendText.destAddr = destAddr;
             sendText.scAddr = scAddr;
-            sendText.text = text;
-            sendText.sentIntent = sentIntent;
-            sendText.deliveryIntent = deliveryIntent;
+            sendText.texts.add(text);
             if (registration == null) {
                 final RegistrationFuture future = registration = new RegistrationFuture();
                 numberToRegistration.put(destAddr, registration);
@@ -166,8 +146,7 @@ public class Service extends android.app.Service {
                     }
 
                     Log.i(LOGTAG, "registration exchange succeeded");
-                    sendText.registration = result;
-                    sendText.send();
+                    sendText.send(Service.this, result, sentIntent, deliveryIntent);
                 }
             });
 
@@ -182,6 +161,15 @@ public class Service extends android.app.Service {
             return false;
         }
     };
+
+    private RegistrationFuture findRegistration(String address) {
+        for (String number: numberToRegistration.keySet()) {
+            if (PhoneNumberUtils.compare(number, address)) {
+                return numberToRegistration.get(number);
+            }
+        }
+        return null;
+    }
 
     private void parseRegistration(SmsMessage message, BEncodedDictionary payload) {
         int part = payload.getInt("p");
@@ -205,14 +193,7 @@ public class Service extends android.app.Service {
             }
         }
 
-        RegistrationFuture registration = null;
-
-        for (String number: numberToRegistration.keySet()) {
-            if (PhoneNumberUtils.compare(number, message.getOriginatingAddress())) {
-                registration = numberToRegistration.get(number);
-                break;
-            }
-        }
+        RegistrationFuture registration = findRegistration(message.getOriginatingAddress());
 
         int partsNeeded = payload.getInt("rl");
         // no registration or new registration, let's set up listeners
@@ -287,23 +268,6 @@ public class Service extends android.app.Service {
             return START_STICKY;
         }
         else if ("android.provider.Telephony.SMS_RECEIVED".equals(intent.getAction())) {
-            Object[] pdus = (Object[]) intent.getSerializableExtra("pdus");
-            for (Object pdu: pdus) {
-                byte[] bytes = (byte[])pdu;
-                try {
-                    JSONObject json = new JSONObject(new String(bytes));
-
-                    Class c = Class.forName("com.android.internal.telephony.SyntheticSmsMessage");
-                    Method m = c.getMethod("isSyntheticPdu", byte[].class);
-                    boolean syn = (Boolean)m.invoke(null, bytes);
-                    Log.i(LOGTAG, "isSyn" + syn);
-                }
-                catch (Exception e) {
-                    e.printStackTrace();;
-                }
-                SmsMessage message = SmsMessage.createFromPdu(bytes);
-                System.out.println(message);
-            }
             return START_STICKY;
         }
         else if ("com.google.android.c2dm.intent.RECEIVE".equals(intent.getAction())) {
@@ -312,8 +276,15 @@ public class Service extends android.app.Service {
             if (GoogleCloudMessaging.MESSAGE_TYPE_SEND_ERROR.equals(messageType)) {
             } else if (GoogleCloudMessaging.MESSAGE_TYPE_DELETED.equals(messageType)) {
             } else {
-                String data = intent.getStringExtra("json");
-                Log.i(LOGTAG, "json: " + data);
+                try {
+                    String data = intent.getStringExtra("bencoded");
+                    GcmText gcmText = GcmText.parse(data);
+                    if (gcmText != null)
+                        smsTransport.synthesizeMessages(gcmText.destAddr, gcmText.scAddr, gcmText.texts, System.currentTimeMillis());
+                }
+                catch (Exception e) {
+                    e.printStackTrace();
+                }
             }
         }
 

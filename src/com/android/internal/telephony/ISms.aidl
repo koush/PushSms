@@ -37,5 +37,5 @@ import java.util.List;
 
 interface ISms {
     void registerSmsMiddleware(String name, ISmsMiddleware middleware);
-    void synthesizeMessage(String originatingAddress, String scAddress, String messageBody, long timestampMillis);
+    void synthesizeMessages(String originatingAddress, String scAddress, in List<String> messages, long timestampMillis);
 }

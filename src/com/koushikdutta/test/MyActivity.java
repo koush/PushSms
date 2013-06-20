@@ -7,6 +7,8 @@ import android.telephony.SmsManager;
 import android.view.View;
 import android.widget.Button;
 
+import com.google.gson.JsonObject;
+
 public class MyActivity extends Activity {
     /**
      * Called when the activity is first created.
@@ -17,6 +19,8 @@ public class MyActivity extends Activity {
         setContentView(R.layout.main);
 
         startService(new Intent(this, Service.class));
+
+
 //
 //        SmsMessage.SubmitPdu submit = SmsMessage.getSubmitPdu("2064228017", "2065528017", "hello", false);
 //
