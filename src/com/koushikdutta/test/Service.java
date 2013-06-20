@@ -257,6 +257,7 @@ public class Service extends android.app.Service {
                 SmsMessage message = SmsMessage.createFromPdu((byte[]) pdusObj[i]);
                 byte[] bytes = message.getUserData();
                 BEncodedDictionary payload = BEncodedDictionary.parseDictionary(ByteBuffer.wrap(bytes));
+                Log.i(LOGTAG, "Got message; " + payload);
                 String type = payload.getString("t");
                 if ("rr".equals(type) || "r".equals(type)) {
                     parseRegistration(message, payload);
