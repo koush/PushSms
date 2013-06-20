@@ -27,6 +27,9 @@
                 <data android:host="localhost" />
                 <data android:port="@string/sms_port" /><!-- this number should be the same as the `myApplicationPort` from above!!! -->
             </intent-filter>
+            <intent-filter>
+                <action android:name="android.provider.Telephony.SMS_RECEIVED" />
+            </intent-filter>
         </receiver>
 
         <receiver

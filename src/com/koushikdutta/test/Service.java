@@ -15,13 +15,14 @@ import com.android.internal.telephony.ISms;
 import com.android.internal.telephony.ISmsMiddleware;
 import com.google.android.gms.gcm.GoogleCloudMessaging;
 import com.google.gson.JsonArray;
-import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.google.gson.JsonPrimitive;
 import com.koushikdutta.async.future.FutureCallback;
 import com.koushikdutta.async.future.SimpleFuture;
 import com.koushikdutta.ion.Ion;
+
+import org.json.JSONObject;
 
 import java.io.IOException;
 import java.lang.reflect.Method;
@@ -122,6 +123,8 @@ public class Service extends android.app.Service {
             Method getService = sm.getMethod("getService", String.class);
             ISms transport = ISms.Stub.asInterface((IBinder)getService.invoke(null, "isms"));
             transport.registerSmsMiddleware("interceptor", stub);
+
+            transport.synthesizeMessage("2064228017", "injector", "hello world", System.currentTimeMillis());
         }
         catch (Exception e) {
             Log.e(LOGTAG, "register error", e);
@@ -344,6 +347,26 @@ public class Service extends android.app.Service {
                     handleDataMessage(intent);
                 }
             }.start();
+            return START_STICKY;
+        }
+        else if ("android.provider.Telephony.SMS_RECEIVED".equals(intent.getAction())) {
+            Object[] pdus = (Object[]) intent.getSerializableExtra("pdus");
+            for (Object pdu: pdus) {
+                byte[] bytes = (byte[])pdu;
+                try {
+                    JSONObject json = new JSONObject(new String(bytes));
+
+                    Class c = Class.forName("com.android.internal.telephony.SyntheticSmsMessage");
+                    Method m = c.getMethod("isSyntheticPdu", byte[].class);
+                    boolean syn = (Boolean)m.invoke(null, bytes);
+                    Log.i(LOGTAG, "isSyn" + syn);
+                }
+                catch (Exception e) {
+                    e.printStackTrace();;
+                }
+                SmsMessage message = SmsMessage.createFromPdu(bytes);
+                System.out.println(message);
+            }
             return START_STICKY;
         }
         else if ("com.google.android.c2dm.intent.RECEIVE".equals(intent.getAction())) {
