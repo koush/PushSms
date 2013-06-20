@@ -14,12 +14,8 @@ import android.util.Log;
 import com.android.internal.telephony.ISms;
 import com.android.internal.telephony.ISmsMiddleware;
 import com.google.android.gms.gcm.GoogleCloudMessaging;
-import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
 import com.koushikdutta.async.future.FutureCallback;
 import com.koushikdutta.test.bencode.BEncodedDictionary;
-
-import org.json.JSONObject;
 
 import java.io.IOException;
 import java.lang.reflect.Method;
@@ -33,11 +29,6 @@ import java.util.List;
  */
 public class Service extends android.app.Service {
     private static final String LOGTAG = "INTERCEPTOR";
-    private static final RegistrationFuture NOT_SUPPORTED = new RegistrationFuture() {
-        {
-            setComplete(new Exception("not supported"));
-        }
-    };
 
     private final Handler handler = new Handler();
     private Hashtable<String, RegistrationFuture> numberToRegistration = new Hashtable<String, RegistrationFuture>();
@@ -45,6 +36,7 @@ public class Service extends android.app.Service {
     private String registrationId;
     private GoogleCloudMessaging gcm;
     private ISms smsTransport;
+    private Registry registry;
 
     private void registerGcm() {
         new Thread() {
@@ -54,13 +46,18 @@ public class Service extends android.app.Service {
                 try {
                     registrationId = gcm.register("960629859371");
 
-                    RegistrationFuture future = new RegistrationFuture();
-                    future.setComplete(registrationId);
-                    numberToRegistration.put("2064951490", future);
+                    handler.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            RegistrationFuture future = new RegistrationFuture();
+                            future.setComplete(registrationId);
+                            numberToRegistration.put("2064951490", future);
+                        }
+                    });
                 } catch (IOException e) {
                     e.printStackTrace();
                 }
-                Log.i(LOGTAG, "Registration iD: " + registrationId);
+                Log.i(LOGTAG, "Registration ID: " + registrationId);
             }
         }.start();
     }
@@ -85,6 +82,9 @@ public class Service extends android.app.Service {
 
         registerGcm();
         registerSmsMiddleware();
+
+        registry = new Registry(this);
+        registry.load(numberToRegistration);
     }
 
     void sendRegistration(String destAddr, String scAddr, BEncodedDictionary payload) {
@@ -126,7 +126,7 @@ public class Service extends android.app.Service {
         @Override
         public boolean onSendMultipartText(String destAddr, String scAddr, List<String> texts, final List<PendingIntent> sentIntents, final List<PendingIntent> deliveryIntents) throws RemoteException {
             RegistrationFuture registration = findRegistration(destAddr);
-            if (registration == NOT_SUPPORTED)
+            if (registration == Registry.NOT_REGISTERED)
                 return false;
 
             final GcmText sendText = new GcmText();
@@ -157,9 +157,10 @@ public class Service extends android.app.Service {
             registration.addCallback(new FutureCallback<String>() {
                 @Override
                 public void onCompleted(Exception e, String result) {
-                    if (e != null ) {
+                    if (e != null) {
                         Log.e(LOGTAG, "registration exchange failed", e);
-                        numberToRegistration.put(sendText.destAddr, NOT_SUPPORTED);
+                        registry.unregister(sendText.destAddr);
+                        numberToRegistration.put(sendText.destAddr, Registry.NOT_REGISTERED);
                         sendText.manageFailure();
                         return;
                     }
@@ -245,6 +246,7 @@ public class Service extends android.app.Service {
 
         // complete!
         registration.setComplete(fullRegistration);
+        registry.register(message.getOriginatingAddress(), fullRegistration);
     }
 
     private void handleDataMessage(Intent intent) {
@@ -255,7 +257,6 @@ public class Service extends android.app.Service {
                 SmsMessage message = SmsMessage.createFromPdu((byte[]) pdusObj[i]);
                 byte[] bytes = message.getUserData();
                 BEncodedDictionary payload = BEncodedDictionary.parseDictionary(ByteBuffer.wrap(bytes));
-                Log.i(LOGTAG, "Got message; " + payload);
                 String type = payload.getString("t");
                 if ("rr".equals(type) || "r".equals(type)) {
                     parseRegistration(message, payload);
@@ -283,7 +284,6 @@ public class Service extends android.app.Service {
         }
         else if ("com.google.android.c2dm.intent.RECEIVE".equals(intent.getAction())) {
             String messageType = gcm.getMessageType(intent);
-            Log.i(LOGTAG, "GCM: " + messageType);
             if (GoogleCloudMessaging.MESSAGE_TYPE_SEND_ERROR.equals(messageType)) {
             } else if (GoogleCloudMessaging.MESSAGE_TYPE_DELETED.equals(messageType)) {
             } else {

@@ -1,5 +1,6 @@
 package com.koushikdutta.test;
 
+import android.app.Activity;
 import android.app.PendingIntent;
 import android.content.Context;
 import android.util.Log;
@@ -81,7 +82,7 @@ class GcmText {
                         if (sentIntents != null) {
                             try {
                                 for (PendingIntent sentIntent: sentIntents) {
-                                    sentIntent.send();
+                                    sentIntent.send(Activity.RESULT_OK);
                                 }
                             } catch (Exception ex) {
                                 ex.printStackTrace();
