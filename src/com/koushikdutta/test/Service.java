@@ -21,11 +21,13 @@ import com.google.gson.JsonPrimitive;
 import com.koushikdutta.async.future.FutureCallback;
 import com.koushikdutta.async.future.SimpleFuture;
 import com.koushikdutta.ion.Ion;
+import com.koushikdutta.test.bencode.BEncodedDictionary;
 
 import org.json.JSONObject;
 
 import java.io.IOException;
 import java.lang.reflect.Method;
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Hashtable;
 import java.util.List;
@@ -43,71 +45,7 @@ public class Service extends android.app.Service {
 
     private final Handler handler = new Handler();
 
-    static class RegistrationFuture extends SimpleFuture<String> {
-        ArrayList<FutureCallback<String>> callbacks = new ArrayList<FutureCallback<String>>();
-        long start = System.currentTimeMillis();
-        String[] registrationParts;
-
-        FutureCallback<String> callback = new FutureCallback<String>() {
-            @Override
-            public void onCompleted(Exception e, String result) {
-                ArrayList<FutureCallback<String>> cbs = callbacks;
-                callbacks = new ArrayList<FutureCallback<String>>();
-                for (FutureCallback<String> cb: cbs) {
-                    cb.onCompleted(e, result);
-                }
-            }
-        };
-
-        public RegistrationFuture() {
-            setCallback(callback);
-        }
-
-        void addCallback(FutureCallback<String> cb) {
-            callbacks.add(cb);
-            setCallback(callback);
-        }
-    }
-
     Hashtable<String, RegistrationFuture> numberToRegistration = new Hashtable<String, RegistrationFuture>();
-
-
-    private class SendText {
-        String destAddr;
-        String scAddr;
-        String text;
-        PendingIntent sentIntent;
-        PendingIntent deliveryIntent;
-
-        String registration;
-
-        private void manageFailure() {
-
-        }
-
-        private void send() {
-            assert registration != null;
-
-            JsonObject payload = new JsonObject();
-            JsonArray regs = new JsonArray();
-            regs.add(new JsonPrimitive(registrationId));
-            payload.add("registration_ids", regs);
-            JsonObject data = new JsonObject();
-            data.addProperty("foo", "bar");
-            payload.add("data", data);
-
-            Ion.with(Service.this)
-                    .load("https://android.googleapis.com/gcm/send")
-                    .setHeader("Authorization", "key=AIzaSyCa9bXc1ppgNy9yVrBXYuCihLndXTPbQq4")
-                    .setJsonObjectBody(payload)
-                    .asString().setCallback(new FutureCallback<String>() {
-                @Override
-                public void onCompleted(Exception e, String result) {
-                    Log.i(LOGTAG, "Response from GCM send: " + result);
-                }
-            });
-        }
-    }
 
     short port;
     String registrationId;
@@ -146,7 +84,7 @@ public class Service extends android.app.Service {
                 regs.add(new JsonPrimitive(registrationId));
                 payload.add("registration_ids", regs);
                 JsonObject data = new JsonObject();
-                data.addProperty("foo", "bar");
+                data.addProperty("json", "foo");
                 payload.add("data", data);
 
                 Ion.with(Service.this)
@@ -163,20 +101,20 @@ public class Service extends android.app.Service {
         }.start();
     }
 
-    void sendRegistration(String destAddr, String scAddr, JsonObject payload) {
+    void sendRegistration(String destAddr, String scAddr, BEncodedDictionary payload) {
 
         int partsNeeded = (registrationId.length() / 80) + 1;
-        payload.addProperty("rl", partsNeeded);
+        payload.put("rl", partsNeeded);
 
         int targetPartSize = registrationId.length() / partsNeeded;
         for (int i = 0; i < partsNeeded; i++) {
             int partSize = Math.min(registrationId.length(), targetPartSize * (i + 1));
 
             String part = registrationId.substring(i * targetPartSize, partSize);
-            payload.addProperty("r", part);
-            payload.addProperty("p", i);
+            payload.put("r", part);
+            payload.put("p", i);
 
-            byte[] bytes = payload.toString().getBytes();
+            byte[] bytes = payload.toByteArray();
             SmsManager.getDefault().sendDataMessage(destAddr, scAddr, port, bytes, null, null);
         }
     }
@@ -193,6 +131,7 @@ public class Service extends android.app.Service {
             }
 
             final SendText sendText = new SendText();
+            sendText.context = Service.this;
             sendText.destAddr = destAddr;
             sendText.scAddr = scAddr;
             sendText.text = text;
@@ -203,10 +142,10 @@ public class Service extends android.app.Service {
                 numberToRegistration.put(destAddr, registration);
 
                 // attempt to negotiate a registration id with the other end
-                JsonObject payload = new JsonObject();
-                payload.addProperty("v", 1);
-                payload.addProperty("t", "rr");
-                payload.addProperty("y", destAddr);
+                BEncodedDictionary payload = new BEncodedDictionary();
+                payload.put("v", 1);
+                payload.put("t", "rr");
+                payload.put("y", destAddr);
 
                 sendRegistration(destAddr, scAddr, payload);
 
@@ -218,6 +157,7 @@ public class Service extends android.app.Service {
                     }
                 }, 300000);
             }
+
             registration.addCallback(new FutureCallback<String>() {
                 @Override
                 public void onCompleted(Exception e, String result) {
@@ -246,23 +186,23 @@ public class Service extends android.app.Service {
         }
     };
 
-    private void parseRegistration(SmsMessage message, JsonObject payload) {
-        int part = payload.get("p").getAsInt();
+    private void parseRegistration(SmsMessage message, BEncodedDictionary payload) {
+        int part = payload.getInt("p");
 
         // if the requester is the this device, just respond right away.
-        if ("rr".equals(payload.get("t").getAsString())) {
+        if ("rr".equals(payload.getString("t"))) {
             final String destAddr = message.getOriginatingAddress();
 
             // if the requester is the this device, just respond right away.
-            String requester = payload.get("y").getAsString();
+            String requester = payload.getString("y");
             if (PhoneNumberUtils.compare(requester, message.getOriginatingAddress())) {
                 if (part != 0)
                     return;
-                JsonObject response = new JsonObject();
-                response.addProperty("v", 1);
-                response.addProperty("t", "r");
+                BEncodedDictionary response = new BEncodedDictionary();
+                response.put("v", 1);
+                response.put("t", "r");
                 // let the requester know who we think they are.
-                response.addProperty("y", destAddr);
+                response.put("y", destAddr);
                 sendRegistration(destAddr, null, response);
                 return;
             }
@@ -277,23 +217,23 @@ public class Service extends android.app.Service {
             }
         }
 
-        int partsNeeded = payload.get("rl").getAsInt();
+        int partsNeeded = payload.getInt("rl");
         // no registration or new registration, let's set up listeners
         if (registration == null || registration.isDone() || registration.start < System.currentTimeMillis() - 300000L) {
             registration = new RegistrationFuture();
 
             // if registration is being requested, send a response once we have all their parts
-            if ("rr".equals(payload.get("t").getAsString())) {
+            if ("rr".equals(payload.getString("t"))) {
                 final String destAddr = message.getOriginatingAddress();
 
                 registration.addCallback(new FutureCallback<String>() {
                     @Override
                     public void onCompleted(Exception e, String result) {
-                        JsonObject response = new JsonObject();
-                        response.addProperty("v", 1);
-                        response.addProperty("t", "r");
+                        BEncodedDictionary response = new BEncodedDictionary();
+                        response.put("v", 1);
+                        response.put("t", "r");
                         // let the requester know who we think they are.
-                        response.addProperty("y", destAddr);
+                        response.put("y", destAddr);
                         sendRegistration(destAddr, null, response);
                     }
                 });
@@ -304,7 +244,7 @@ public class Service extends android.app.Service {
         if (registration.registrationParts == null)
             registration.registrationParts = new String[partsNeeded];
 
-        String registrationPart = payload.get("r").getAsString();
+        String registrationPart = payload.getString("r");
         registration.registrationParts[part] = registrationPart;
 
         String fullRegistration = "";
@@ -325,9 +265,9 @@ public class Service extends android.app.Service {
             for (int i = 0; i < pdusObj.length; i++) {
                 SmsMessage message = SmsMessage.createFromPdu((byte[]) pdusObj[i]);
                 byte[] bytes = message.getUserData();
-                JsonObject payload = new JsonParser().parse(new String(bytes)).getAsJsonObject();
+                BEncodedDictionary payload = BEncodedDictionary.parseDictionary(ByteBuffer.wrap(bytes));
                 Log.i(LOGTAG, "Got message; " + payload);
-                String type = payload.get("t").getAsString();
+                String type = payload.getString("t");
                 if ("rr".equals(type) || "r".equals(type)) {
                     parseRegistration(message, payload);
                 }
@@ -375,8 +315,8 @@ public class Service extends android.app.Service {
             if (GoogleCloudMessaging.MESSAGE_TYPE_SEND_ERROR.equals(messageType)) {
             } else if (GoogleCloudMessaging.MESSAGE_TYPE_DELETED.equals(messageType)) {
             } else {
-                String data = intent.getStringExtra("foo");
-                Log.i(LOGTAG, "foo: " + data);
+                String data = intent.getStringExtra("json");
+                Log.i(LOGTAG, "json: " + data);
             }
         }
 
