@@ -1,4 +1,4 @@
-package com.koushikdutta.test;
+package org.cyanogenmod.pushsms;
 
 import android.app.Activity;
 import android.app.PendingIntent;
@@ -6,14 +6,12 @@ import android.content.Context;
 import android.util.Log;
 
 import com.google.gson.JsonArray;
-import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
 import com.google.gson.JsonPrimitive;
 import com.koushikdutta.async.future.FutureCallback;
 import com.koushikdutta.ion.Ion;
-import com.koushikdutta.test.bencode.BEncodedDictionary;
-import com.koushikdutta.test.bencode.BEncodedList;
+import org.cyanogenmod.pushsms.bencode.BEncodedDictionary;
+import org.cyanogenmod.pushsms.bencode.BEncodedList;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;

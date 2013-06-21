@@ -1,4 +1,4 @@
-package com.koushikdutta.test;
+package org.cyanogenmod.pushsms;
 
 import com.koushikdutta.async.future.FutureCallback;
 import com.koushikdutta.async.future.SimpleFuture;

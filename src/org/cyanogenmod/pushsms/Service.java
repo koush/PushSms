@@ -1,4 +1,4 @@
-package com.koushikdutta.test;
+package org.cyanogenmod.pushsms;
 
 import android.app.PendingIntent;
 import android.content.Intent;
@@ -16,7 +16,7 @@ import com.android.internal.telephony.ISms;
 import com.android.internal.telephony.ISmsMiddleware;
 import com.google.android.gms.gcm.GoogleCloudMessaging;
 import com.koushikdutta.async.future.FutureCallback;
-import com.koushikdutta.test.bencode.BEncodedDictionary;
+import org.cyanogenmod.pushsms.bencode.BEncodedDictionary;
 
 import java.io.IOException;
 import java.lang.reflect.Method;

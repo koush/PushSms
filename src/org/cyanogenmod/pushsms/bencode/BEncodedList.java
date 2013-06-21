@@ -1,4 +1,4 @@
-package com.koushikdutta.test.bencode;
+package org.cyanogenmod.pushsms.bencode;
 
 import java.util.ArrayList;
 

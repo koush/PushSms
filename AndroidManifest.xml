@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-          package="com.koushikdutta.test"
+          package="org.cyanogenmod.pushsms"
           android:versionCode="1"
           android:versionName="1.0">
 
@@ -8,14 +8,17 @@
 
     <uses-permission android:name="com.google.android.c2dm.permission.RECEIVE" />
 
-
-    <permission android:name="com.koushikdutta.test.permission.C2D_MESSAGE"
+    <permission android:name="org.cyanogenmod.test.permission.C2D_MESSAGE"
                 android:protectionLevel="signature" />
     <uses-permission android:name="com.koushikdutta.test.permission.C2D_MESSAGE" />
 
     <uses-permission android:name="android.permission.SEND_SMS" />
     <uses-permission android:name="android.permission.RECEIVE_SMS" />
     <uses-permission android:name="android.permission.INTERNET" />
+
+    <uses-permission android:name="com.google.android.googleapps.permission.GOOGLE_AUTH" />
+    <uses-permission android:name="com.google.android.googleapps.permission.GOOGLE_AUTH.OTHER_SERVICES" />
+    <uses-permission android:name="com.google.android.googleapps.permission.GOOGLE_AUTH.ALL_SERVICES" />
 
     <application
             android:label="@string/app_name"

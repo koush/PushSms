@@ -1,4 +1,4 @@
-package com.koushikdutta.test;
+package org.cyanogenmod.pushsms;
 
 import android.content.Context;
 import android.content.SharedPreferences;

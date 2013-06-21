@@ -1,11 +1,8 @@
-package com.koushikdutta.test;
+package org.cyanogenmod.pushsms;
 
-import android.app.Activity;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
-
-import com.google.android.gms.gcm.GoogleCloudMessaging;
 
 public class GcmBroadcastReceiver extends BroadcastReceiver {
     static final String TAG = "GCMDemo";
