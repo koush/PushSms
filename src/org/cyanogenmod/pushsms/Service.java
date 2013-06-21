@@ -160,6 +160,12 @@ public class Service extends android.app.Service {
                 public void onCompleted(Exception e, String result) {
                     if (e != null) {
                         Log.e(LOGTAG, "registration exchange failed", e);
+                        handler.post(new Runnable() {
+                            @Override
+                            public void run() {
+                                Toast.makeText(Service.this, "GCM Sms registration failure: " + sendText.destAddr, Toast.LENGTH_SHORT).show();
+                            }
+                        });
                         registry.unregister(sendText.destAddr);
                         numberToRegistration.put(sendText.destAddr, Registry.NOT_REGISTERED);
                         sendText.manageFailure();
