@@ -5,6 +5,7 @@ import android.app.Activity;
 import android.app.Dialog;
 import android.content.Intent;
 import android.os.Bundle;
+import android.telephony.SmsManager;
 import android.view.View;
 import android.widget.Button;
 
@@ -26,8 +27,7 @@ public class MyActivity extends Activity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.main);
 
-        startService(new Intent(this, Service.class));
-
+        startService(new Intent(this, MiddlewareService.class));
 
 //
 //        SmsMessage.SubmitPdu submit = SmsMessage.getSubmitPdu("2064228017", "2065528017", "hello", false);
@@ -35,12 +35,16 @@ public class MyActivity extends Activity {
 //        SmsMessage sms = SmsMessage.createFromPdu(submit.encodedMessage);
 //        System.out.println(sms.getMessageBody());
 
+
         Button button = (Button)findViewById(R.id.button);
         button.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
 //                SmsManager.getDefault().sendDataMessage("2064951490", null, Short.valueOf(getString(R.string.sms_port)), new byte[100], null, null);
-//                SmsManager.getDefault().sendTextMessage("2064951490", null, "hello world", null, null);
+                SmsManager.getDefault().sendTextMessage("2064951490", null, "hello world", null, null);
+
+                if (true)
+                    return;
 
                 Intent intent = AccountPicker.newChooseAccountIntent(null, null, new String[]{"com.google"},
                         false, null, null, null, null);
@@ -71,6 +75,12 @@ public class MyActivity extends Activity {
         else if (requestCode == REQUEST_AUTH && resultCode == RESULT_OK && data != null) {
             System.out.println("token: " + data.getStringExtra(AccountManager.KEY_AUTHTOKEN));
         }
+    }
+
+    private void onAuthToken(String authToken) {
+        Intent service = new Intent(this, MiddlewareService.class);
+        service.putExtra("registration", authToken);
+        startService(service);
     }
 
     // Example of how to use the GoogleAuthUtil in a blocking, non-main thread context

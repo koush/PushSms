@@ -16,9 +16,9 @@ public class Registry {
         }
     };
 
-    Context mContext;
-    SharedPreferences mSharedPreferences;
-    SharedPreferences.Editor mEditor;
+    private Context mContext;
+    private SharedPreferences mSharedPreferences;
+    private SharedPreferences.Editor mEditor;
     public Registry(Context context) {
         mContext = context;
         mSharedPreferences = mContext.getSharedPreferences("registry", Context.MODE_PRIVATE);

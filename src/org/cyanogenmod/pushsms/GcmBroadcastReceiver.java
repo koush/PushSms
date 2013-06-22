@@ -9,7 +9,7 @@ public class GcmBroadcastReceiver extends BroadcastReceiver {
     Context ctx;
     @Override
     public void onReceive(Context context, Intent intent) {
-        intent.setClass(context, Service.class);
+        intent.setClass(context, MiddlewareService.class);
         context.startService(intent);
 //        GoogleCloudMessaging gcm = GoogleCloudMessaging.getInstance(context);
 //        ctx = context;

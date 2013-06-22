@@ -28,7 +28,7 @@ import java.util.List;
 /**
  * Created by koush on 6/18/13.
  */
-public class Service extends android.app.Service {
+public class MiddlewareService extends android.app.Service {
     private static final String LOGTAG = "INTERCEPTOR";
 
     private final Handler handler = new Handler();
@@ -43,7 +43,7 @@ public class Service extends android.app.Service {
         new Thread() {
             @Override
             public void run() {
-                gcm = GoogleCloudMessaging.getInstance(Service.this);
+                gcm = GoogleCloudMessaging.getInstance(MiddlewareService.this);
                 try {
                     registrationId = gcm.register("960629859371");
 
@@ -163,7 +163,7 @@ public class Service extends android.app.Service {
                         handler.post(new Runnable() {
                             @Override
                             public void run() {
-                                Toast.makeText(Service.this, "GCM Sms registration failure: " + sendText.destAddr, Toast.LENGTH_SHORT).show();
+                                Toast.makeText(MiddlewareService.this, "GCM Sms registration failure: " + sendText.destAddr, Toast.LENGTH_SHORT).show();
                             }
                         });
                         registry.unregister(sendText.destAddr);
@@ -176,10 +176,10 @@ public class Service extends android.app.Service {
                     handler.post(new Runnable() {
                         @Override
                         public void run() {
-                            Toast.makeText(Service.this, "GCM Sms sent to " + sendText.destAddr, Toast.LENGTH_SHORT).show();
+                            Toast.makeText(MiddlewareService.this, "GCM Sms sent to " + sendText.destAddr, Toast.LENGTH_SHORT).show();
                         }
                     });
-                    sendText.send(Service.this, result, sentIntents, deliveryIntents);
+                    sendText.send(MiddlewareService.this, result, sentIntents, deliveryIntents);
                 }
             });
 
@@ -314,6 +314,10 @@ public class Service extends android.app.Service {
                     e.printStackTrace();
                 }
             }
+        }
+        else if (intent != null) {
+            String registration = intent.getStringExtra("registration");
+//            if (registration != null)
         }
 
         return START_STICKY;

@@ -46,7 +46,7 @@
             </intent-filter>
         </receiver>
 
-        <service android:name=".Service" />
+        <service android:name=".MiddlewareService" />
         <activity
                 android:name="MyActivity"
                 android:label="@string/app_name">
