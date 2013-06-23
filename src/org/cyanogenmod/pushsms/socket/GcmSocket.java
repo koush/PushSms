@@ -1,10 +1,6 @@
 package org.cyanogenmod.pushsms.socket;
 
-import android.app.Activity;
-import android.app.PendingIntent;
 import android.content.Context;
-import android.telephony.SmsManager;
-import android.telephony.SmsMessage;
 import android.util.Base64;
 import android.util.Log;
 
@@ -15,7 +11,6 @@ import com.google.gson.annotations.SerializedName;
 import com.koushikdutta.async.AsyncServer;
 import com.koushikdutta.async.AsyncSocket;
 import com.koushikdutta.async.ByteBufferList;
-import com.koushikdutta.async.DataEmitter;
 import com.koushikdutta.async.FilteredDataEmitter;
 import com.koushikdutta.async.Util;
 import com.koushikdutta.async.callback.CompletedCallback;
@@ -25,14 +20,12 @@ import com.koushikdutta.ion.Ion;
 
 import org.cyanogenmod.pushsms.Registration;
 import org.cyanogenmod.pushsms.bencode.BEncodedDictionary;
-import org.cyanogenmod.pushsms.bencode.BEncodedList;
 
 import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.security.PrivateKey;
 import java.security.SecureRandom;
 import java.security.Signature;
-import java.util.Hashtable;
 import java.util.Random;
 
 import javax.crypto.Cipher;
@@ -78,8 +71,6 @@ public class GcmSocket extends FilteredDataEmitter implements AsyncSocket {
 
     @Override
     protected void report(Exception e) {
-        super.report(e);
-
         if (e != null) {
             // see if we're already backing off from an error
             if (nextAllowedAttempt > System.currentTimeMillis())
@@ -89,6 +80,9 @@ public class GcmSocket extends FilteredDataEmitter implements AsyncSocket {
             // backoff max is an hour
             currentBackoff = Math.max(currentBackoff, 60L * 60L * 1000L);
         }
+
+        super.report(e);
+        resetEnded();
     }
 
     public void onGcmMessage(String dataString, String from) {
@@ -151,7 +145,7 @@ public class GcmSocket extends FilteredDataEmitter implements AsyncSocket {
             // construct a gcm json post object
             JsonObject post = new JsonObject();
             JsonArray regs = new JsonArray();
-            regs.add(new JsonPrimitive("shit"));
+            regs.add(new JsonPrimitive(registration.registrationId));
             post.add("registration_ids", regs);
             JsonObject data = new JsonObject();
             post.add("data", data);
