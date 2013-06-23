@@ -5,7 +5,12 @@ import java.util.ArrayList;
 
 public class BEncodedList extends ArrayList<Object> {
     public int getInt(int index) {
-        return 0;
+        Object ret = get(index);
+        if (ret instanceof Integer) {
+            return (Integer)ret;
+        }
+
+        return (int)(long)(Long)ret;
     }
     
     public String getString(int index) {

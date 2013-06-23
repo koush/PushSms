@@ -24,7 +24,7 @@ public class BEncodedDictionary {
         case 'd':
             return parseDictionary(b);
         case 'i':
-            return parseInt(b);
+            return parseLong(b);
         case 'l':
             return parseList(b);
         case '0':
@@ -58,7 +58,7 @@ public class BEncodedDictionary {
         ensureStart(b, 'e');
     }
     
-    private static int parseIntInternal(ByteBuffer b, char delim) {
+    private static long parseLongInternal(ByteBuffer b, char delim) {
         String val = "";
         char c;
         while (delim != (c = (char)b.get())) {
@@ -79,12 +79,12 @@ public class BEncodedDictionary {
                 throw new IllegalArgumentException("bad format");
             }
         }
-        return Integer.parseInt(val);
+        return Long.parseLong(val);
     }
 
-    public static int parseInt(ByteBuffer b) {
+    public static long parseLong(ByteBuffer b) {
         ensureStart(b, 'i');
-        int ret = parseIntInternal(b, 'e');
+        long ret = parseLongInternal(b, 'e');
         return ret;
     }
     
@@ -100,7 +100,7 @@ public class BEncodedDictionary {
     }
     
     public static byte[] parseBytes(ByteBuffer b) {
-        int len = parseIntInternal(b, ':');
+        int len = (int)parseLongInternal(b, ':');
         byte[] buf = new byte[len];
         b.get(buf);
         return buf;
@@ -161,6 +161,11 @@ public class BEncodedDictionary {
             bout.write(o.toString().getBytes());
             bout.write('e');
         }
+        else if (o instanceof Long) {
+            bout.write('i');
+            bout.write(o.toString().getBytes());
+            bout.write('e');
+        }
         else if (o instanceof BEncodedList) {
             BEncodedList l = (BEncodedList)o;
             bout.write('l');
@@ -198,9 +203,23 @@ public class BEncodedDictionary {
         return (BEncodedDictionary)dict.get(key);
     }
 
-    public int getInt(String key) {
-        return (Integer)dict.get(key);
+    public long getLong(String key) {
+        Object ret = dict.get(key);
+        if (ret instanceof Integer) {
+            return (long)(int)(Integer)ret;
+        }
+
+        return (Long)ret;
     }
+    public int getInt(String key) {
+        Object ret = dict.get(key);
+        if (ret instanceof Integer) {
+            return (Integer)ret;
+        }
+
+        return (int)(long)(Long)ret;
+    }
+
     public String getString(String key) {
         byte[] bytes = getBytes(key);
         if (bytes == null)

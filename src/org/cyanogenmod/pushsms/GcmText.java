@@ -3,6 +3,7 @@ package org.cyanogenmod.pushsms;
 import android.app.Activity;
 import android.app.PendingIntent;
 import android.content.Context;
+import android.telephony.SmsManager;
 import android.util.Log;
 
 import com.google.gson.JsonArray;
@@ -22,9 +23,13 @@ class GcmText {
     String destAddr;
     String scAddr;
     ArrayList<String> texts = new ArrayList<String>();
+    boolean multipart;
 
-    public void manageFailure() {
-
+    public void manageFailure(final List<PendingIntent> sentIntents, final List<PendingIntent> deliveryIntents) {
+        if (multipart)
+            SmsManager.getDefault().sendMultipartTextMessage(destAddr, scAddr, texts, new ArrayList<PendingIntent>(sentIntents), new ArrayList<PendingIntent>(deliveryIntents));
+        else
+            SmsManager.getDefault().sendTextMessage(destAddr, scAddr, texts.get(0), sentIntents.get(0), deliveryIntents.get(0));
     }
 
     public static GcmText parse(String data) {
@@ -46,7 +51,7 @@ class GcmText {
         }
     }
 
-    public void send(Context context, String registration, final List<PendingIntent> sentIntents, final List<PendingIntent> deliveryIntents) {
+    public void send(Context context, String gcmApiKey, String registration, final List<PendingIntent> sentIntents, final List<PendingIntent> deliveryIntents) {
         assert registration != null;
 
         JsonObject payload = new JsonObject();
@@ -70,12 +75,17 @@ class GcmText {
 
         Ion.with(context)
                 .load("https://android.googleapis.com/gcm/send")
-                .setHeader("Authorization", "key=AIzaSyCa9bXc1ppgNy9yVrBXYuCihLndXTPbQq4")
+                .setHeader("Authorization", "key=" + gcmApiKey)
                 .setJsonObjectBody(payload)
-                .asString()
-                .setCallback(new FutureCallback<String>() {
+                .asJsonObject()
+                .setCallback(new FutureCallback<JsonObject>() {
                     @Override
-                    public void onCompleted(Exception e, String result) {
+                    public void onCompleted(Exception e, JsonObject result) {
+                        if (e != null) {
+                            manageFailure(sentIntents, deliveryIntents);
+                            return;
+                        }
+
                         Log.i(LOGTAG, "Response from GCM send: " + result);
                         if (sentIntents != null) {
                             try {

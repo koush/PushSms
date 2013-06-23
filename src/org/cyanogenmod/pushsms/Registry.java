@@ -2,6 +2,7 @@ package org.cyanogenmod.pushsms;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.util.Base64;
 
 import java.util.Hashtable;
 import java.util.Map;
@@ -10,12 +11,6 @@ import java.util.Map;
  * Created by koush on 6/19/13.
  */
 public class Registry {
-    public static final RegistrationFuture NOT_REGISTERED = new RegistrationFuture() {
-        {
-            setComplete(new Exception("not supported"));
-        }
-    };
-
     private Context mContext;
     private SharedPreferences mSharedPreferences;
     private SharedPreferences.Editor mEditor;
@@ -25,13 +20,8 @@ public class Registry {
         mEditor = mSharedPreferences.edit();
     }
 
-    public void register(String number, String registration) {
-        mEditor.putString(number, registration);
-        mEditor.commit();
-    }
-
-    public void unregister(String number) {
-        mEditor.putString(number, "not_registered");
+    public void register(String number, Registration registration) {
+        mEditor.putString(number, registration.encode());
         mEditor.commit();
     }
 
@@ -39,18 +29,17 @@ public class Registry {
         try {
             Map<String, ?> current = mSharedPreferences.getAll();
             for (String number: current.keySet()) {
-                Object registration = current.get(number);
-                if (registration instanceof String) {
-                    RegistrationFuture future;
-                    String regString = (String)registration;
-                    if ("not_registered".equals((String)regString)) {
-                        future = NOT_REGISTERED;
+                Object r = current.get(number);
+                if (r instanceof String) {
+                    try {
+                        Registration registration = Registration.parse((String)r);
+                        RegistrationFuture future = new RegistrationFuture();
+                        future.setComplete(registration);
+                        numberToRegistration.put(number, future);
                     }
-                    else {
-                        future = new RegistrationFuture();
-                        future.setComplete(regString);
+                    catch (Exception e) {
+                        e.printStackTrace();
                     }
-                    numberToRegistration.put(number, future);
                 }
             }
         }

@@ -1,5 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="sms_port">9958</string>
-    <string name="app_name">Test</string>
+    <string name="app_name">Secure Messaging</string>
+    <string name="accounts">Messaging Accounts</string>
+    <string name="phone_number">Phone Number</string>
+    <string name="requesting_authorization">Requesting Authorization</string>
+    <string name="secure_messaging_info">Secure messages can be sent between CyanogenMod users. Otherwise normal SMS will be sent.</string>
 </resources>

@@ -1,24 +1,100 @@
 package org.cyanogenmod.pushsms;
 
+import android.accounts.Account;
 import android.accounts.AccountManager;
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.app.Dialog;
+import android.app.ProgressDialog;
+import android.content.DialogInterface;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.os.Bundle;
+import android.telephony.PhoneNumberUtils;
 import android.telephony.SmsManager;
+import android.telephony.TelephonyManager;
+import android.text.Editable;
+import android.text.TextUtils;
 import android.view.View;
+import android.view.ViewGroup;
+import android.widget.AdapterView;
+import android.widget.ArrayAdapter;
 import android.widget.Button;
+import android.widget.CheckedTextView;
+import android.widget.EditText;
+import android.widget.ListView;
+import android.widget.Switch;
 
 import com.google.android.gms.auth.GoogleAuthException;
 import com.google.android.gms.auth.GoogleAuthUtil;
 import com.google.android.gms.auth.GooglePlayServicesAvailabilityException;
 import com.google.android.gms.auth.UserRecoverableAuthException;
-import com.google.android.gms.common.AccountPicker;
 import com.google.android.gms.common.GooglePlayServicesUtil;
 
 import java.io.IOException;
+import java.security.KeyPair;
+import java.security.KeyPairGenerator;
+import java.util.UUID;
+
+import javax.crypto.Cipher;
+import javax.crypto.spec.SecretKeySpec;
 
 public class MyActivity extends Activity {
+    class AccountAdapter extends ArrayAdapter<Account> {
+        AccountAdapter() {
+            super(MyActivity.this, android.R.layout.simple_list_item_multiple_choice);
+        }
+
+        @Override
+        public View getView(int position, View convertView, ViewGroup parent) {
+            View view = super.getView(position, convertView, parent);
+
+            CheckedTextView tv = (CheckedTextView) view.findViewById(android.R.id.text1);
+            tv.setText(getItem(position).name);
+
+            Account account = getItem(position);
+
+            tv.setChecked(accounts.getString(account.name, null) != null
+                    && accounts.getBoolean(account.name, false));
+            return view;
+        }
+    }
+
+    AccountAdapter accountAdapter;
+    SharedPreferences accounts;
+    SharedPreferences settings;
+
+    void login(final String accountName) {
+        final ProgressDialog dlg = new ProgressDialog(this);
+        dlg.setMessage(getString(R.string.requesting_authorization));
+        dlg.setIndeterminate(true);
+        dlg.setCancelable(false);
+        dlg.show();
+
+        new Thread() {
+            @Override
+            public void run() {
+                getAndUseAuthTokenBlocking(accountName);
+                dlg.dismiss();
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        accountAdapter.notifyDataSetInvalidated();
+                    }
+                });
+                reregister();
+            }
+        }.start();
+    }
+
+    private String getNumber() {
+        final TelephonyManager tm = (TelephonyManager) getSystemService(TELEPHONY_SERVICE);
+        String ret = settings.getString("phone_number", tm.getLine1Number());
+        if (TextUtils.isEmpty(ret))
+            ret = tm.getLine1Number();
+        return ret;
+    }
+
     /**
      * Called when the activity is first created.
      */
@@ -27,60 +103,119 @@ public class MyActivity extends Activity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.main);
 
+        accounts = getSharedPreferences("accounts", MODE_PRIVATE);
+        settings = getSharedPreferences("settings", MODE_PRIVATE);
+
+//        try {
+//            KeyPairGenerator gen = KeyPairGenerator.getInstance("RSA");
+//            gen.initialize(2048);
+//            KeyPair kp = gen.generateKeyPair();
+//            Cipher cipher = Cipher.getInstance("RSA/ECB/PKCS1Padding");
+//            cipher.init(Cipher.ENCRYPT_MODE, kp.getPublic());
+//            byte[] output = cipher.doFinal(new byte[256]);
+//
+//            cipher = Cipher.getInstance("RSA/ECB/PKCS1Padding");
+//            cipher.init(Cipher.DECRYPT_MODE, kp.getPrivate());
+//            String data = new String(cipher.doFinal(output));
+//            System.out.println(data);
+//
+//            cipher = Cipher.getInstance("AES");
+//            cipher.init(Cipher.ENCRYPT_MODE, new SecretKeySpec(UUID.randomUUID().toString().getBytes(), "AES"));
+//            output = cipher.doFinal("hello world".getBytes());
+//            System.out.println(output);
+//        }
+//        catch (Exception e) {
+//            e.printStackTrace();
+//        }
+
+        ListView lv = (ListView) findViewById(R.id.list);
+        View header = getLayoutInflater().inflate(R.layout.header, null);
+        lv.addHeaderView(header);
+        lv.setAdapter(accountAdapter = new AccountAdapter());
+
+        final Switch toggle = (Switch)header.findViewById(R.id.toggle);
+        toggle.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                settings.edit().putBoolean("enabled", toggle.isChecked()).commit();
+            }
+        });
+        toggle.setChecked(settings.getBoolean("enabled", true));
+
+        final Button phoneNumber = (Button) header.findViewById(R.id.phone_number);
+        phoneNumber.setText(getNumber());
+        phoneNumber.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                final EditText input = new EditText(MyActivity.this);
+
+                new AlertDialog.Builder(MyActivity.this)
+                        .setTitle(R.string.phone_number)
+                        .setView(input)
+                        .setPositiveButton(android.R.string.ok, new DialogInterface.OnClickListener() {
+                            public void onClick(DialogInterface dialog, int whichButton) {
+                                settings.edit().putString("phone_number", input.getText().toString()).commit();
+                                phoneNumber.setText(getNumber());
+                            }
+                        }).setNegativeButton(android.R.string.cancel, new DialogInterface.OnClickListener() {
+                    public void onClick(DialogInterface dialog, int whichButton) {
+                        // Do nothing.
+                    }
+                }).show();
+            }
+        });
+
+        for (Account account : AccountManager.get(this).getAccountsByType("com.google")) {
+            accountAdapter.add(account);
+        }
+
+        lv.setOnItemClickListener(new AdapterView.OnItemClickListener() {
+            @Override
+            public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
+                CheckedTextView tv = (CheckedTextView) view.findViewById(android.R.id.text1);
+                Account account = accountAdapter.getItem((int)id);
+                if (tv.isChecked()) {
+                    accounts.edit().putBoolean(account.name, false).commit();
+                    tv.toggle();
+                    reregister();
+                    return;
+                }
+
+                login(account.name);
+            }
+        });
+
         startService(new Intent(this, MiddlewareService.class));
 
-//
-//        SmsMessage.SubmitPdu submit = SmsMessage.getSubmitPdu("2064228017", "2065528017", "hello", false);
-//
-//        SmsMessage sms = SmsMessage.createFromPdu(submit.encodedMessage);
-//        System.out.println(sms.getMessageBody());
-
-
-        Button button = (Button)findViewById(R.id.button);
+        Button button = (Button) findViewById(R.id.button);
         button.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
 //                SmsManager.getDefault().sendDataMessage("2064951490", null, Short.valueOf(getString(R.string.sms_port)), new byte[100], null, null);
-                SmsManager.getDefault().sendTextMessage("2064951490", null, "hello world", null, null);
-
-                if (true)
-                    return;
-
-                Intent intent = AccountPicker.newChooseAccountIntent(null, null, new String[]{"com.google"},
-                        false, null, null, null, null);
-                startActivityForResult(intent, REQUEST_GOOGLE);
+                SmsManager.getDefault().sendTextMessage("2064228017", null, "hello world", null, null);
             }
         });
     }
 
-    private static final int REQUEST_GOOGLE = 5945;
+    private void reregister() {
+        settings.edit().putBoolean("needs_register", true).commit();
+        Intent intent = new Intent(this, MiddlewareService.class);
+        intent.setAction(MiddlewareService.ACTION_REGISTER);
+        startService(intent);
+    }
+
     private static final int REQUEST_AUTH = 5946;
 
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
 
-        if (requestCode == REQUEST_GOOGLE && resultCode == RESULT_OK && data != null) {
+        if (requestCode == REQUEST_AUTH && resultCode == RESULT_OK && data != null) {
             final String accountName = data.getStringExtra(AccountManager.KEY_ACCOUNT_NAME);
-            if (accountName == null)
-                return;
-
-            new Thread() {
-                @Override
-                public void run() {
-                    getAndUseAuthTokenBlocking(accountName);
-                }
-            }.start();
+            accounts.edit().putBoolean(accountName, true).commit();
+            accountAdapter.notifyDataSetInvalidated();
+            reregister();
         }
-        else if (requestCode == REQUEST_AUTH && resultCode == RESULT_OK && data != null) {
-            System.out.println("token: " + data.getStringExtra(AccountManager.KEY_AUTHTOKEN));
-        }
-    }
-
-    private void onAuthToken(String authToken) {
-        Intent service = new Intent(this, MiddlewareService.class);
-        service.putExtra("registration", authToken);
-        startService(service);
     }
 
     // Example of how to use the GoogleAuthUtil in a blocking, non-main thread context
@@ -88,8 +223,8 @@ public class MyActivity extends Activity {
         try {
             // Retrieve a token for the given account and scope. It will always return either
             // a non-empty String or throw an exception.
-            final String token = GoogleAuthUtil.getToken(this, accountName, "oauth2:https://www.googleapis.com/auth/userinfo.email");
-            GoogleAuthUtil.invalidateToken(this, token);
+            GoogleAuthUtil.getToken(this, accountName, "oauth2:https://www.googleapis.com/auth/userinfo.email");
+            accounts.edit().putBoolean(accountName, true).commit();
         } catch (GooglePlayServicesAvailabilityException playEx) {
             final Dialog alert = GooglePlayServicesUtil.getErrorDialog(
                     playEx.getConnectionStatusCode(),

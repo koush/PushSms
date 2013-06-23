@@ -5,16 +5,14 @@ import com.koushikdutta.async.future.SimpleFuture;
 
 import java.util.ArrayList;
 
-class RegistrationFuture extends SimpleFuture<String> {
-    ArrayList<FutureCallback<String>> callbacks = new ArrayList<FutureCallback<String>>();
-    long start = System.currentTimeMillis();
-    String[] registrationParts;
-    FutureCallback<String> callback = new FutureCallback<String>() {
+class RegistrationFuture extends SimpleFuture<Registration> {
+    ArrayList<FutureCallback<Registration>> callbacks = new ArrayList<FutureCallback<Registration>>();
+    FutureCallback<Registration> callback = new FutureCallback<Registration>() {
         @Override
-        public void onCompleted(Exception e, String result) {
-            ArrayList<FutureCallback<String>> cbs = callbacks;
-            callbacks = new ArrayList<FutureCallback<String>>();
-            for (FutureCallback<String> cb : cbs) {
+        public void onCompleted(Exception e, Registration result) {
+            ArrayList<FutureCallback<Registration>> cbs = callbacks;
+            callbacks = new ArrayList<FutureCallback<Registration>>();
+            for (FutureCallback<Registration> cb : cbs) {
                 cb.onCompleted(e, result);
             }
         }
@@ -24,7 +22,7 @@ class RegistrationFuture extends SimpleFuture<String> {
         setCallback(callback);
     }
 
-    void addCallback(FutureCallback<String> cb) {
+    void addCallback(FutureCallback<Registration> cb) {
         callbacks.add(cb);
         setCallback(callback);
     }
