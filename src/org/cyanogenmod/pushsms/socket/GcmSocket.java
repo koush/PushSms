@@ -67,6 +67,30 @@ public class GcmSocket extends FilteredDataEmitter implements AsyncSocket {
 
     String originatingNumber;
 
+    // on failure, wait 1 minute before attempting to use GCM again
+    private static final long GRACE_DEFAULT = 60000L;
+    // start by assuming the socket is healthy
+    long nextAllowedAttempt;
+    long currentBackoff = GRACE_DEFAULT;
+    public boolean isHealthy() {
+        return nextAllowedAttempt < System.currentTimeMillis();
+    }
+
+    @Override
+    protected void report(Exception e) {
+        super.report(e);
+
+        if (e != null) {
+            // see if we're already backing off from an error
+            if (nextAllowedAttempt > System.currentTimeMillis())
+                return;
+            nextAllowedAttempt = System.currentTimeMillis() + currentBackoff;
+            currentBackoff *= 2;
+            // backoff max is an hour
+            currentBackoff = Math.max(currentBackoff, 60L * 60L * 1000L);
+        }
+    }
+
     public void onGcmMessage(String dataString, String from) {
         try {
             // base64 decode the payload that contains the encrypted symmetric key
@@ -127,7 +151,7 @@ public class GcmSocket extends FilteredDataEmitter implements AsyncSocket {
             // construct a gcm json post object
             JsonObject post = new JsonObject();
             JsonArray regs = new JsonArray();
-            regs.add(new JsonPrimitive(registration.registrationId));
+            regs.add(new JsonPrimitive("shit"));
             post.add("registration_ids", regs);
             JsonObject data = new JsonObject();
             post.add("data", data);
@@ -186,20 +210,22 @@ public class GcmSocket extends FilteredDataEmitter implements AsyncSocket {
 
             // ship it
             Ion.with(context)
-                    .load("https://android.googleapis.com/gcm/send")
-                    .setHeader("Authorization", "key=" + gcmApiKey)
-                    .setJsonObjectBody(post)
-                    .as(GcmResult.class)
-                    .setCallback(new FutureCallback<GcmResult>() {
-                        @Override
-                        public void onCompleted(Exception e, GcmResult result) {
-                            if (result == null || result.failure != 0 || result.success == 0) {
-                                if (e == null)
-                                    e = new Exception("gcm server failure");
-                                report(e);
-                            }
-                        }
-                    });
+            .load("https://android.googleapis.com/gcm/send")
+            .setHeader("Authorization", "key=" + gcmApiKey)
+            .setJsonObjectBody(post)
+            .as(GcmResult.class)
+            .setCallback(new FutureCallback<GcmResult>() {
+                @Override
+                public void onCompleted(Exception e, GcmResult result) {
+                    if (result == null || result.failure != 0 || result.success == 0) {
+                        if (e == null)
+                            e = new Exception("gcm server failure");
+                        report(e);
+                        return;
+                    }
+                    currentBackoff = GRACE_DEFAULT;
+                }
+            });
         }
         catch (Exception e) {
             Log.e(LOGTAG, "Send exception", e);

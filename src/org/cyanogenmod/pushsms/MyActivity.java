@@ -161,7 +161,7 @@ public class MyActivity extends Activity {
             @Override
             public void onClick(View v) {
 //                SmsManager.getDefault().sendDataMessage("2064951490", null, Short.valueOf(getString(R.string.sms_port)), new byte[100], null, null);
-                SmsManager.getDefault().sendTextMessage("2064228017", null, "hello world", null, null);
+                SmsManager.getDefault().sendTextMessage("2064228017", null, "hello world " + System.currentTimeMillis(), null, null);
             }
         });
     }

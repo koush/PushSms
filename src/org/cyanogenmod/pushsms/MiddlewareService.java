@@ -2,6 +2,7 @@ package org.cyanogenmod.pushsms;
 
 import android.accounts.Account;
 import android.accounts.AccountManager;
+import android.app.Activity;
 import android.app.PendingIntent;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -12,6 +13,7 @@ import android.os.IBinder;
 import android.os.RemoteException;
 import android.provider.ContactsContract;
 import android.telephony.PhoneNumberUtils;
+import android.telephony.SmsManager;
 import android.telephony.TelephonyManager;
 import android.text.TextUtils;
 import android.util.Base64;
@@ -26,6 +28,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonPrimitive;
 import com.koushikdutta.async.ByteBufferList;
 import com.koushikdutta.async.DataEmitter;
+import com.koushikdutta.async.callback.CompletedCallback;
 import com.koushikdutta.async.callback.DataCallback;
 import com.koushikdutta.async.future.FutureCallback;
 import com.koushikdutta.ion.Ion;
@@ -77,6 +80,7 @@ public class MiddlewareService extends android.app.Service {
     private String gcmSenderId;
     private GcmConnectionManager gcmConnectionManager;
     private Hashtable<String, GcmText> messagesAwaitingAck = new Hashtable<String, GcmText>();
+    private SmsManager smsManager;
 
     private static final String SERVER_API_URL = "https://cmmessaging.appspot.com/api/v1";
     private static final String GCM_URL = SERVER_API_URL + "/gcm";
@@ -218,6 +222,8 @@ public class MiddlewareService extends android.app.Service {
         settings = getSharedPreferences("settings", MODE_PRIVATE);
         accounts = getSharedPreferences("accounts", MODE_PRIVATE);
 
+        smsManager = SmsManager.getDefault();
+
         getOrCreateKeyPair();
 
         gcm = GoogleCloudMessaging.getInstance(MiddlewareService.this);
@@ -271,7 +277,6 @@ public class MiddlewareService extends android.app.Service {
 
             // compute a deterministic message id
             StringBuilder builder = new StringBuilder();
-            builder.append(destAddr);
             for (String text: texts) {
                 builder.append(text);
             }
@@ -282,6 +287,7 @@ public class MiddlewareService extends android.app.Service {
             catch (Exception e) {
                 lookup = "";
             }
+            lookup = destAddr + ":" + lookup;
             final String lookupFinal = lookup;
 
             // see if this one failed delivery, and just ignore it
@@ -300,15 +306,32 @@ public class MiddlewareService extends android.app.Service {
 
             RegistrationFuture future = findRegistration(destAddr);
 
+            // try to fail out synchronously
             if (future != null && future.isDone()) {
                 try {
-                    if (!future.get().isRegistered())
+                    Registration registration = future.get();
+                    if (!registration.isRegistered())
+                        return false;
+
+                    GcmSocket gcmSocket = gcmConnectionManager.findGcmSocket(registration, getNumber());
+                    if (!gcmSocket.isHealthy())
                         return false;
                 }
                 catch (Exception e) {
                     return false;
                 }
             }
+
+            messagesAwaitingAck.put(lookupFinal, sendText);
+            Ion.getDefault(MiddlewareService.this).getServer().postDelayed(new Runnable() {
+                @Override
+                public void run() {
+                    // if not acked, attempt normal delivery
+                    if (messagesAwaitingAck.containsKey(lookupFinal)) {
+                        sendText.manageFailure(handler, smsManager);
+                    }
+                }
+            }, ACK_TIMEOUT);
 
             if (future == null)
                 future = createRegistration(destAddr);
@@ -317,27 +340,32 @@ public class MiddlewareService extends android.app.Service {
                 @Override
                 public void onCompleted(Exception e, Registration result) {
                     if (e != null || !result.isRegistered()) {
-                        sendText.manageFailure();
+                        sendText.manageFailure(handler, smsManager);
                         return;
                     }
 
                     sendText.send(findOrCreateGcmSocket(result), lookupFinal);
-                    messagesAwaitingAck.put(lookupFinal, sendText);
-                    Ion.getDefault(MiddlewareService.this).getServer().postDelayed(new Runnable() {
-                        @Override
-                        public void run() {
-                            // if not acked, attempt normal delivery
-                            if (messagesAwaitingAck.containsKey(lookupFinal)) {
-                                sendText.manageFailure();
-                            }
-                        }
-                    }, ACK_TIMEOUT);
                 }
             });
 
             return true;
         }
     };
+
+    private void firePendingIntents(List<PendingIntent> intents) {
+        if (intents == null)
+            return;
+        for (PendingIntent pi: intents) {
+            try {
+                if (pi == null)
+                    continue;
+                pi.send(Activity.RESULT_OK);
+            }
+            catch (Exception e) {
+                Log.e(LOGTAG, "Error delivering pending intent", e);
+            }
+        }
+    }
 
     private GcmSocket findOrCreateGcmSocket(Registration registration) {
         GcmSocket ret = gcmConnectionManager.findGcmSocket(registration, getNumber());
@@ -370,7 +398,11 @@ public class MiddlewareService extends android.app.Service {
                             String messageId = message.getString("id");
                             if (messageId == null)
                                 return;
-                            messagesAwaitingAck.remove(messageId);
+                            GcmText gcmText = messagesAwaitingAck.remove(messageId);
+                            if (gcmText == null)
+                                return;
+                            firePendingIntents(gcmText.sentIntents);
+                            firePendingIntents(gcmText.deliveryIntents);
                         }
                     }
                     catch (Exception e) {
@@ -378,11 +410,26 @@ public class MiddlewareService extends android.app.Service {
                     }
                 }
             });
+
+            ret.setEndCallback(new CompletedCallback() {
+                @Override
+                public void onCompleted(Exception ex) {
+                    for (String pending: new ArrayList<String>(messagesAwaitingAck.keySet())) {
+                        String numberPart = pending.split(":")[0];
+                        if (!PhoneNumberUtils.compare(MiddlewareService.this, numberPart, gcmSocket.getNumber()))
+                            continue;
+                        GcmText gcmText = messagesAwaitingAck.get(pending);
+                        if (gcmText == null)
+                            continue;
+                        gcmText.manageFailure(handler, smsManager);
+                    }
+                }
+            });
         }
         return ret;
     }
 
-    private RegistrationFuture createRegistration(String address) {
+    private RegistrationFuture createRegistration(final String address) {
         final RegistrationFuture ret = new RegistrationFuture();
         numberToRegistration.put(address, ret);
 
@@ -414,6 +461,7 @@ public class MiddlewareService extends android.app.Service {
                     if (result.has("error"))
                         throw new Exception(result.toString());
 
+                    registration.endpoint = address;
                     registration.registrationId = result.get("registration_id").getAsString();
                     BigInteger publicExponent = new BigInteger(Base64.decode(result.get("public_exponent").getAsString(), Base64.DEFAULT));
                     BigInteger publicModulus = new BigInteger(Base64.decode(result.get("public_modulus").getAsString(), Base64.DEFAULT));

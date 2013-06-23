@@ -1,10 +1,10 @@
 package org.cyanogenmod.pushsms;
 
 import android.app.PendingIntent;
+import android.os.Handler;
 import android.telephony.SmsManager;
 import android.util.Log;
 
-import com.google.gson.annotations.SerializedName;
 import com.koushikdutta.async.ByteBufferList;
 
 import org.cyanogenmod.pushsms.bencode.BEncodedDictionary;
@@ -23,17 +23,24 @@ class GcmText {
     List<PendingIntent> sentIntents;
     List<PendingIntent> deliveryIntents;
 
-    public void manageFailure() {
-        if (multipart)
-            SmsManager.getDefault().sendMultipartTextMessage(
+    public void manageFailure(Handler handler, final SmsManager smsManager) {
+        handler.post(new Runnable() {
+            @Override
+            public void run() {
+                if (multipart) {
+                    smsManager.sendMultipartTextMessage(
                     destAddr, scAddr, texts,
                     sentIntents != null ? new ArrayList<PendingIntent>(sentIntents) : null,
                     deliveryIntents != null ? new ArrayList<PendingIntent>(deliveryIntents) : null);
-        else
-            SmsManager.getDefault().sendTextMessage(
+                }
+                else {
+                    smsManager.sendTextMessage(
                     destAddr, scAddr, texts.get(0),
                     sentIntents != null ? sentIntents.get(0) : null,
                     deliveryIntents != null ? deliveryIntents.get(0) : null);
+                }
+            }
+        });
     }
 
     public static GcmText parse(GcmSocket gcmSocket, BEncodedDictionary message) {
