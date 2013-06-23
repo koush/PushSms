@@ -10,10 +10,8 @@ import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.os.Bundle;
-import android.telephony.PhoneNumberUtils;
 import android.telephony.SmsManager;
 import android.telephony.TelephonyManager;
-import android.text.Editable;
 import android.text.TextUtils;
 import android.view.View;
 import android.view.ViewGroup;
@@ -32,12 +30,6 @@ import com.google.android.gms.auth.UserRecoverableAuthException;
 import com.google.android.gms.common.GooglePlayServicesUtil;
 
 import java.io.IOException;
-import java.security.KeyPair;
-import java.security.KeyPairGenerator;
-import java.util.UUID;
-
-import javax.crypto.Cipher;
-import javax.crypto.spec.SecretKeySpec;
 
 public class MyActivity extends Activity {
     class AccountAdapter extends ArrayAdapter<Account> {
@@ -54,8 +46,7 @@ public class MyActivity extends Activity {
 
             Account account = getItem(position);
 
-            tv.setChecked(accounts.getString(account.name, null) != null
-                    && accounts.getBoolean(account.name, false));
+            tv.setChecked(accounts.getBoolean(account.name, false));
             return view;
         }
     }
@@ -105,28 +96,6 @@ public class MyActivity extends Activity {
 
         accounts = getSharedPreferences("accounts", MODE_PRIVATE);
         settings = getSharedPreferences("settings", MODE_PRIVATE);
-
-//        try {
-//            KeyPairGenerator gen = KeyPairGenerator.getInstance("RSA");
-//            gen.initialize(2048);
-//            KeyPair kp = gen.generateKeyPair();
-//            Cipher cipher = Cipher.getInstance("RSA/ECB/PKCS1Padding");
-//            cipher.init(Cipher.ENCRYPT_MODE, kp.getPublic());
-//            byte[] output = cipher.doFinal(new byte[256]);
-//
-//            cipher = Cipher.getInstance("RSA/ECB/PKCS1Padding");
-//            cipher.init(Cipher.DECRYPT_MODE, kp.getPrivate());
-//            String data = new String(cipher.doFinal(output));
-//            System.out.println(data);
-//
-//            cipher = Cipher.getInstance("AES");
-//            cipher.init(Cipher.ENCRYPT_MODE, new SecretKeySpec(UUID.randomUUID().toString().getBytes(), "AES"));
-//            output = cipher.doFinal("hello world".getBytes());
-//            System.out.println(output);
-//        }
-//        catch (Exception e) {
-//            e.printStackTrace();
-//        }
 
         ListView lv = (ListView) findViewById(R.id.list);
         View header = getLayoutInflater().inflate(R.layout.header, null);

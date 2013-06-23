@@ -18,6 +18,10 @@ public class BEncodedDictionary {
         ensureEnd(b);
         return ret;
     }
+
+    public static BEncodedDictionary parseDictionary(byte[] b) {
+        return BEncodedDictionary.parseDictionary(ByteBuffer.wrap(b));
+    }
     
     private static Object parse(ByteBuffer b) {
         switch (peek(b)) {

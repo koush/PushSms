@@ -18,6 +18,8 @@ class Registration {
     long date;
     String registrationId;
     String endpoint;
+    int remoteSequenceNumber;
+    int localSequenceNumber;
 
     public boolean isRegistered() {
         return date > 0;

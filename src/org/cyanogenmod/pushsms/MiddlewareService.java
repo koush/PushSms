@@ -12,12 +12,10 @@ import android.os.IBinder;
 import android.os.RemoteException;
 import android.provider.ContactsContract;
 import android.telephony.PhoneNumberUtils;
-import android.telephony.SmsManager;
 import android.telephony.TelephonyManager;
 import android.text.TextUtils;
 import android.util.Base64;
 import android.util.Log;
-import android.widget.Toast;
 
 import com.android.internal.telephony.ISms;
 import com.android.internal.telephony.ISmsMiddleware;
@@ -26,14 +24,8 @@ import com.google.android.gms.gcm.GoogleCloudMessaging;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonPrimitive;
-import com.koushikdutta.async.ByteBufferList;
-import com.koushikdutta.async.DataEmitter;
-import com.koushikdutta.async.callback.DataCallback;
 import com.koushikdutta.async.future.FutureCallback;
 import com.koushikdutta.ion.Ion;
-
-import org.cyanogenmod.pushsms.bencode.BEncodedDictionary;
-import org.cyanogenmod.pushsms.socket.SmsSocket;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -192,8 +184,6 @@ public class MiddlewareService extends android.app.Service {
     public void onCreate() {
         super.onCreate();
 
-//        smsPort = Short.valueOf(getString(R.string.sms_port));
-
         settings = getSharedPreferences("settings", MODE_PRIVATE);
         accounts = getSharedPreferences("accounts", MODE_PRIVATE);
 
@@ -210,17 +200,6 @@ public class MiddlewareService extends android.app.Service {
         if (settings.getBoolean("needs_register", false))
             registerEndpoints();
     }
-
-//    void sendRegistration(final String destAddr, final BEncodedDictionary payload) {
-//        selfRegistrationFuture.addCallback(new FutureCallback<Registration>() {
-//            @Override
-//            public void onCompleted(Exception e, Registration registration) {
-//                payload.put("r", registration.registrationId);
-//                SmsSocket socket = findOrCreateSmsSocket(destAddr);
-//                socket.write(new ByteBufferList(payload.toByteArray()));
-//            }
-//        });
-//    }
 
     ISmsMiddleware.Stub stub = new ISmsMiddleware.Stub() {
         @Override
@@ -274,7 +253,6 @@ public class MiddlewareService extends android.app.Service {
             if (future == null)
                 future = createRegistration(destAddr);
 
-
             future.addCallback(new FutureCallback<Registration>() {
                 @Override
                 public void onCompleted(Exception e, Registration result) {
@@ -283,75 +261,17 @@ public class MiddlewareService extends android.app.Service {
                         return;
                     }
 
-                    sendText.send(MiddlewareService.this, gcmApiKey, result.registrationId, sentIntents, deliveryIntents);
+                    sendText.send(MiddlewareService.this, getNumber(), keyPair.getPrivate(), gcmApiKey, result, sentIntents, deliveryIntents);
                 }
             });
 
-
             return true;
-
-
-//            if (registration == Registry.NOT_REGISTERED)
-//                return false;
-//
-//            final GcmText sendText = new GcmText();
-//            sendText.destAddr = destAddr;
-//            sendText.scAddr = scAddr;
-//            sendText.texts.addAll(texts);
-//            if (registration == null) {
-//                final RegistrationFuture future = registration = new RegistrationFuture();
-//                numberToRegistration.put(destAddr, registration);
-//
-//                // attempt to negotiate a registration id with the other end
-//                BEncodedDictionary payload = new BEncodedDictionary();
-//                payload.put("v", 1);
-//                payload.put("t", "rr");
-//                payload.put("y", destAddr);
-//
-//                sendRegistration(destAddr, payload);
-//
-//                handler.postDelayed(new Runnable() {
-//                    @Override
-//                    public void run() {
-//                        if (!future.isDone())
-//                            future.setComplete(new Exception("no response"));
-//                    }
-//                }, 300000);
-//            }
-//
-//            registration.addCallback(new FutureCallback<Registration>() {
-//                @Override
-//                public void onCompleted(Exception e, Registration result) {
-//                    if (e != null) {
-//                        Log.e(LOGTAG, "registration exchange failed", e);
-//                        handler.post(new Runnable() {
-//                            @Override
-//                            public void run() {
-//                                Toast.makeText(MiddlewareService.this, "GCM Sms registration failure: " + sendText.destAddr, Toast.LENGTH_SHORT).show();
-//                            }
-//                        });
-//                        registry.unregister(sendText.destAddr);
-//                        numberToRegistration.put(sendText.destAddr, Registry.NOT_REGISTERED);
-//                        sendText.manageFailure();
-//                        return;
-//                    }
-//
-//                    Log.i(LOGTAG, "registration exchange succeeded");
-//                    handler.post(new Runnable() {
-//                        @Override
-//                        public void run() {
-//                            Toast.makeText(MiddlewareService.this, "GCM Sms sent to " + sendText.destAddr, Toast.LENGTH_SHORT).show();
-//                        }
-//                    });
-//                    sendText.send(MiddlewareService.this, gcmApiKey, result.registrationId, sentIntents, deliveryIntents);
-//                }
-//            });
         }
     };
 
     private RegistrationFuture createRegistration(String address) {
-
         final RegistrationFuture ret = new RegistrationFuture();
+        numberToRegistration.put(address, ret);
 
         JsonObject post = new JsonObject();
         JsonArray authorities = new JsonArray();
@@ -395,18 +315,18 @@ public class MiddlewareService extends android.app.Service {
         }
 
         Ion.with(this)
-                .load(FIND_URL)
-                .setJsonObjectBody(post)
-                .asJsonObject().setCallback(new FutureCallback<JsonObject>() {
+        .load(FIND_URL)
+        .setJsonObjectBody(post)
+        .asJsonObject().setCallback(new FutureCallback<JsonObject>() {
             @Override
             public void onCompleted(Exception e, JsonObject result) {
+                Registration registration = new Registration();
                 try {
                     if (e != null)
                         throw e;
                     if (result.has("error"))
                         throw new Exception(result.toString());
 
-                    Registration registration = new Registration();
                     registration.registrationId = result.get("registration_id").getAsString();
                     BigInteger publicExponent = new BigInteger(Base64.decode(result.get("public_exponent").getAsString(), Base64.DEFAULT));
                     BigInteger publicModulus = new BigInteger(Base64.decode(result.get("public_modulus").getAsString(), Base64.DEFAULT));
@@ -414,12 +334,11 @@ public class MiddlewareService extends android.app.Service {
                     KeyFactory keyFactory = KeyFactory.getInstance("RSA");
                     registration.remotePublicKey = keyFactory.generatePublic(publicKeySpec);
                     registration.date = System.currentTimeMillis();
-
-                    ret.setComplete(registration);
                 }
                 catch (Exception ex) {
-                    ret.setComplete(ex);
+                    registration.date = 0;
                 }
+                ret.setComplete(registration);
             }
         });
 
@@ -435,110 +354,50 @@ public class MiddlewareService extends android.app.Service {
 
         return null;
     }
-//
-//    private SmsSocket findOrCreateSmsSocket(String number) {
-//        for (SmsSocket smsSocket: smsSockets) {
-//            if (PhoneNumberUtils.compare(this, number, smsSocket.getNumber()))
-//                return smsSocket;
-//        }
-//
-//        final SmsSocket ret = new SmsSocket(this, Ion.getDefault(this).getServer(), number, smsPort);
-//        smsSockets.add(ret);
-//
-//        ret.setDataCallback(new DataCallback() {
-//            @Override
-//            public void onDataAvailable(DataEmitter emitter, ByteBufferList bb) {
-//                try {
-//                    BEncodedDictionary payload = BEncodedDictionary.parseDictionary(bb.getAll());
-//                    String t = payload.getString("t");
-//                    if (t == null)
-//                        return;
-//                    if ("rr".equals(t)) {
-//                        // if the requester is the this device, just respond right away.
-//                        String requester = payload.getString("y");
-//                        if (PhoneNumberUtils.compare(requester, ret.getNumber())) {
-//                            BEncodedDictionary response = new BEncodedDictionary();
-//                            response.put("v", 1);
-//                            response.put("t", "r");
-//                            // let the requester know who we think they are.
-//                            response.put("y", ret.getNumber());
-//                            sendRegistration(ret.getNumber(), response);
-//                            return;
-//                        }
-//                    }
-//
-//                    String r = payload.getString("r");
-//                    if (r == null)
-//                        return;
-//
-//                    RegistrationFuture rf = findRegistration(ret.getNumber());
-//
-//                    // no registration or new registration, let's set up listeners
-//                    if (rf == null || rf.isDone() || rf.start < System.currentTimeMillis() - 300000L) {
-//                        rf = new RegistrationFuture();
-//                        numberToRegistration.put(ret.getNumber(), rf);
-//                    }
-//
-//                    handler.post(new Runnable() {
-//                        @Override
-//                        public void run() {
-//                            Toast.makeText(MiddlewareService.this, "GCM Sms with " + ret.getNumber() + " enabled", Toast.LENGTH_SHORT).show();
-//                        }
-//                    });
-//                    Registration registration = new Registration();
-//                    registration.registrationId = r;
-//                    rf.setComplete(registration);
-//                    registry.register(ret.getNumber(), r);
-//                }
-//                catch (Exception e) {
-//                }
-//            }
-//        });
-//        return ret;
-//    }
-//
-//    ArrayList<SmsSocket> smsSockets = new ArrayList<SmsSocket>();
+
+    private RegistrationFuture findOrCreateRegistration(String address) {
+        RegistrationFuture future = findRegistration(address);
+        if (future != null)
+            return future;
+        return createRegistration(address);
+    }
+
+    void parseGcmText(final Registration registration, final String payload, final String from) {
+        new Thread() {
+            @Override
+            public void run() {
+                GcmText gcmText = GcmText.parse(payload, keyPair.getPrivate(), registration);
+                if (gcmText != null) {
+                    try {
+                        smsTransport.synthesizeMessages(gcmText.destAddr, gcmText.scAddr, gcmText.texts, System.currentTimeMillis());
+                    }
+                    catch (Exception ex) {
+                        ex.printStackTrace();
+                    }
+                }
+            }
+        }.start();
+    }
 
     @Override
     public int onStartCommand(final Intent intent, int flags, int startId) {
         if (intent != null) {
-//            if ("android.intent.action.DATA_SMS_RECEIVED".equals(intent.getAction())) {
-//                try {
-//                    Bundle bundle = intent.getExtras();
-//                    Object[] pdusObj = (Object[]) bundle.get("pdus");
-//                    for (int i = 0; i < pdusObj.length; i++) {
-//                        SmsMessage message = SmsMessage.createFromPdu((byte[]) pdusObj[i]);
-//
-//                        SmsSocket smsSocket = findOrCreateSmsSocket(message.getOriginatingAddress());
-//
-//                        smsSocket.onMessage(message);
-//                    }
-//                }
-//                catch (Exception e) {
-//                    e.printStackTrace();
-//                }
-//                return START_STICKY;
-//            }
-//            else if ("android.provider.Telephony.SMS_RECEIVED".equals(intent.getAction())) {
-//                return START_STICKY;
-//            }
-//            else
             if ("com.google.android.c2dm.intent.RECEIVE".equals(intent.getAction())) {
                 String messageType = gcm.getMessageType(intent);
-                if (GoogleCloudMessaging.MESSAGE_TYPE_SEND_ERROR.equals(messageType)) {
-                } else if (GoogleCloudMessaging.MESSAGE_TYPE_DELETED.equals(messageType)) {
-                } else {
-                    try {
-                        String data = intent.getStringExtra("bencoded");
-                        GcmText gcmText = GcmText.parse(data);
-                        if (gcmText != null) {
-                            Toast.makeText(this, "GCM Sms from " + gcmText.destAddr + " received", Toast.LENGTH_SHORT).show();
-                            smsTransport.synthesizeMessages(gcmText.destAddr, gcmText.scAddr, gcmText.texts, System.currentTimeMillis());
+                if (GoogleCloudMessaging.MESSAGE_TYPE_MESSAGE.equals(messageType)) {
+                    final String payload = intent.getStringExtra("p");
+                    final String from = intent.getStringExtra("f");
+                    if (from == null)
+                        return START_STICKY;
+                    findOrCreateRegistration(from)
+                    .addCallback(new FutureCallback<Registration>() {
+                        @Override
+                        public void onCompleted(Exception e, Registration result) {
+                            if (result == null || !result.isRegistered())
+                                return;
+                            parseGcmText(result, payload, from);
                         }
-                    }
-                    catch (Exception e) {
-                        e.printStackTrace();
-                    }
+                    });
                 }
             }
             else if (ACTION_REGISTER.equals(intent.getAction())) {
@@ -580,8 +439,8 @@ public class MiddlewareService extends android.app.Service {
             }
         }
         post.addProperty("endpoint", getNumber());
-        post.addProperty("public_modulus", Base64.encodeToString(rsaPublicKeySpec.getModulus().toByteArray(), Base64.DEFAULT));
-        post.addProperty("public_exponent", Base64.encodeToString(rsaPublicKeySpec.getPublicExponent().toByteArray(), Base64.DEFAULT));
+        post.addProperty("public_modulus", Base64.encodeToString(rsaPublicKeySpec.getModulus().toByteArray(), Base64.NO_WRAP));
+        post.addProperty("public_exponent", Base64.encodeToString(rsaPublicKeySpec.getPublicExponent().toByteArray(), Base64.NO_WRAP));
 
         Ion.with(MiddlewareService.this)
         .load("https://cmmessaging.appspot.com/api/v1/register")
@@ -596,7 +455,7 @@ public class MiddlewareService extends android.app.Service {
                 settings.edit().putBoolean("needs_register", false).commit();
             }
         });
-    };
+    }
 
     boolean registering = false;
     private void registerEndpoints() {

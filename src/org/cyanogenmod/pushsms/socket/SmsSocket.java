@@ -12,7 +12,6 @@ import com.koushikdutta.async.Util;
 import com.koushikdutta.async.callback.CompletedCallback;
 import com.koushikdutta.async.callback.WritableCallback;
 
-import org.cyanogenmod.pushsms.R;
 import org.cyanogenmod.pushsms.bencode.BEncodedDictionary;
 
 import java.nio.ByteBuffer;
