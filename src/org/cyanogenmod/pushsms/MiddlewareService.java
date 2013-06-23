@@ -24,8 +24,15 @@ import com.google.android.gms.gcm.GoogleCloudMessaging;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonPrimitive;
+import com.koushikdutta.async.ByteBufferList;
+import com.koushikdutta.async.DataEmitter;
+import com.koushikdutta.async.callback.DataCallback;
 import com.koushikdutta.async.future.FutureCallback;
 import com.koushikdutta.ion.Ion;
+
+import org.cyanogenmod.pushsms.bencode.BEncodedDictionary;
+import org.cyanogenmod.pushsms.socket.GcmConnectionManager;
+import org.cyanogenmod.pushsms.socket.GcmSocket;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -51,7 +58,9 @@ import java.util.List;
  * Created by koush on 6/18/13.
  */
 public class MiddlewareService extends android.app.Service {
-    private static final String LOGTAG = "INTERCEPTOR";
+    private static final int ACK_TIMEOUT = 30000;
+    private static final String LOGTAG = "PushSMS";
+    public static final String ACTION_REGISTER = "org.cyanogenmod.intent.action.REGISTER";
 
     private final Handler handler = new Handler();
     private Hashtable<String, RegistrationFuture> numberToRegistration = new Hashtable<String, RegistrationFuture>();
@@ -64,28 +73,40 @@ public class MiddlewareService extends android.app.Service {
     private SharedPreferences accounts;
     private KeyPair keyPair;
     private RSAPublicKeySpec rsaPublicKeySpec;
-    String gcmApiKey;
+    private String gcmApiKey;
+    private String gcmSenderId;
+    private GcmConnectionManager gcmConnectionManager;
+    private Hashtable<String, GcmText> messagesAwaitingAck = new Hashtable<String, GcmText>();
 
     private static final String SERVER_API_URL = "https://cmmessaging.appspot.com/api/v1";
     private static final String GCM_URL = SERVER_API_URL + "/gcm";
     private static final String FIND_URL = SERVER_API_URL + "/find";
+    private static final String REGISTER_URL = SERVER_API_URL + "/register";
 
-    private void registerGcm(final String senderId) {
+    private void registerGcm() {
         new Thread() {
             @Override
             public void run() {
-                try {
-                    gcm = GoogleCloudMessaging.getInstance(MiddlewareService.this);
-
-                    final String r = gcm.register(senderId);
-                    Registration self = new Registration();
-                    self.registrationId = r;
-                    selfRegistrationFuture.setComplete(self);
+                long sleep = 1000;
+                while (true) {
+                    try {
+                        final String r = gcm.register(gcmSenderId);
+                        Registration self = new Registration();
+                        self.registrationId = r;
+                        selfRegistrationFuture.setComplete(self);
 //                    numberToRegistration.put("2064951490", selfRegistrationFuture);
-                    Log.i(LOGTAG, "Registration ID: " + r);
-                } catch (IOException e) {
-                    e.printStackTrace();
-                    selfRegistrationFuture.setComplete(e);
+                        Log.i(LOGTAG, "Registration ID: " + r);
+                        break;
+                    } catch (IOException e) {
+                        Log.e(LOGTAG, "GCM Registration error", e);
+                        // backoff and try again.
+                        try {
+                            sleep = Math.max(sleep * 2L, 30L * 60L * 1000L);
+                            Thread.sleep(sleep);
+                        }
+                        catch (Exception ex) {
+                        }
+                    }
                 }
             }
         }.start();
@@ -101,16 +122,17 @@ public class MiddlewareService extends android.app.Service {
                 try {
                     if (e != null)
                         throw e;
-                    String senderId = result.get("sender_id").getAsString();
+                    gcmSenderId = result.get("sender_id").getAsString();
                     gcmApiKey = result.get("api_key").getAsString();
                     settings.edit()
-                    .putString("gcm_sender_id", senderId)
+                    .putString("gcm_sender_id", gcmSenderId)
                     .putString("gcm_api_key", gcmApiKey)
                     .commit();
-                    registerGcm(senderId);
                 }
                 catch (Exception ex) {
-                    registerGcm(settings.getString("gcm_sender_id", "494395756847"));
+                }
+                finally {
+                    registerGcm();
                 }
             }
         });
@@ -180,6 +202,15 @@ public class MiddlewareService extends android.app.Service {
         }
     }
 
+    private void setupGcmConnectionManager() {
+        selfRegistrationFuture.addCallback(new FutureCallback<Registration>() {
+            @Override
+            public void onCompleted(Exception e, Registration result) {
+                gcmConnectionManager = new GcmConnectionManager(MiddlewareService.this, keyPair.getPrivate(), gcmApiKey);
+            }
+        });
+    }
+
     @Override
     public void onCreate() {
         super.onCreate();
@@ -189,8 +220,11 @@ public class MiddlewareService extends android.app.Service {
 
         getOrCreateKeyPair();
 
+        gcm = GoogleCloudMessaging.getInstance(MiddlewareService.this);
         gcmApiKey = settings.getString("gcm_api_key", null);
+        gcmSenderId = settings.getString("gcm_sender_id", "494395756847");
         getGcmInfo();
+        setupGcmConnectionManager();
 
         registerSmsMiddleware();
 
@@ -232,11 +266,37 @@ public class MiddlewareService extends android.app.Service {
             if (!selfRegistrationFuture.isDone())
                 return false;
 
+            if (gcmConnectionManager == null)
+                return false;
+
+            // compute a deterministic message id
+            StringBuilder builder = new StringBuilder();
+            builder.append(destAddr);
+            for (String text: texts) {
+                builder.append(text);
+            }
+            String lookup;
+            try {
+                lookup = Base64.encodeToString(MessageDigest.getInstance("MD5").digest(builder.toString().getBytes()), Base64.NO_WRAP);
+            }
+            catch (Exception e) {
+                lookup = "";
+            }
+            final String lookupFinal = lookup;
+
+            // see if this one failed delivery, and just ignore it
+            if (messagesAwaitingAck.containsKey(lookup)) {
+                messagesAwaitingAck.remove(lookup);
+                return false;
+            }
+
             final GcmText sendText = new GcmText();
             sendText.destAddr = destAddr;
             sendText.scAddr = scAddr;
             sendText.texts.addAll(texts);
             sendText.multipart = multipart;
+            sendText.deliveryIntents = deliveryIntents;
+            sendText.sentIntents = sentIntents;
 
             RegistrationFuture future = findRegistration(destAddr);
 
@@ -257,11 +317,21 @@ public class MiddlewareService extends android.app.Service {
                 @Override
                 public void onCompleted(Exception e, Registration result) {
                     if (e != null || !result.isRegistered()) {
-                        sendText.manageFailure(sentIntents, deliveryIntents);
+                        sendText.manageFailure();
                         return;
                     }
 
-                    sendText.send(MiddlewareService.this, getNumber(), keyPair.getPrivate(), gcmApiKey, result, sentIntents, deliveryIntents);
+                    sendText.send(findOrCreateGcmSocket(result), lookupFinal);
+                    messagesAwaitingAck.put(lookupFinal, sendText);
+                    Ion.getDefault(MiddlewareService.this).getServer().postDelayed(new Runnable() {
+                        @Override
+                        public void run() {
+                            // if not acked, attempt normal delivery
+                            if (messagesAwaitingAck.containsKey(lookupFinal)) {
+                                sendText.manageFailure();
+                            }
+                        }
+                    }, ACK_TIMEOUT);
                 }
             });
 
@@ -269,46 +339,63 @@ public class MiddlewareService extends android.app.Service {
         }
     };
 
+    private GcmSocket findOrCreateGcmSocket(Registration registration) {
+        GcmSocket ret = gcmConnectionManager.findGcmSocket(registration, getNumber());
+        if (ret == null) {
+            final GcmSocket gcmSocket = ret = gcmConnectionManager.createGcmSocket(registration, getNumber());
+            ret.setDataCallback(new DataCallback() {
+                @Override
+                public void onDataAvailable(DataEmitter emitter, ByteBufferList bb) {
+                    try {
+                        BEncodedDictionary message = BEncodedDictionary.parseDictionary(bb.getAllByteArray());
+                        String messageType = message.getString("t");
+                        if (MessageTypes.MESSAGE.equals(messageType)) {
+                            GcmText gcmText = GcmText.parse(gcmSocket, message);
+                            if (gcmText == null)
+                                return;
+
+                            // ack the message
+                            String messageId = message.getString("id");
+                            if (messageId != null) {
+                                BEncodedDictionary ack = new BEncodedDictionary();
+                                ack.put("t", MessageTypes.ACK);
+                                ack.put("id", messageId);
+                                gcmSocket.write(new ByteBufferList(ack.toByteArray()));
+                            }
+
+                            // synthesize a fake message for the android system
+                            smsTransport.synthesizeMessages(gcmSocket.getNumber(), gcmText.scAddr, gcmText.texts, System.currentTimeMillis());
+                        }
+                        else if (MessageTypes.ACK.equals(messageType)) {
+                            String messageId = message.getString("id");
+                            if (messageId == null)
+                                return;
+                            messagesAwaitingAck.remove(messageId);
+                        }
+                    }
+                    catch (Exception e) {
+                        Log.e(LOGTAG, "Error handling GCM socket message", e);
+                    }
+                }
+            });
+        }
+        return ret;
+    }
+
     private RegistrationFuture createRegistration(String address) {
         final RegistrationFuture ret = new RegistrationFuture();
         numberToRegistration.put(address, ret);
 
-        JsonObject post = new JsonObject();
-        JsonArray authorities = new JsonArray();
-        HashSet<String> emailHash = new HashSet<String>();
-        post.add("authorities", authorities);
-        post.addProperty("endpoint", address);
-
-        Uri uri = Uri.withAppendedPath(ContactsContract.PhoneLookup.CONTENT_FILTER_URI, Uri.encode(address));
-        Cursor c = getContentResolver().query(uri, new String[]{ContactsContract.PhoneLookup._ID }, null, null, null);
-
-        while (c != null && c.moveToNext()) {
-            Cursor emailCursor = getContentResolver().query(ContactsContract.CommonDataKinds.Email.CONTENT_URI,
-                    new String[] {ContactsContract.CommonDataKinds.Email.ADDRESS },
-                    ContactsContract.CommonDataKinds.Email.CONTACT_ID + "=?",
-                    new String[] { String.valueOf(c.getLong(c.getColumnIndex(ContactsContract.PhoneLookup._ID)))},
-                    null
-            );
-            while (emailCursor != null && emailCursor.moveToNext()) {
-                try {
-                    MessageDigest digest = MessageDigest.getInstance("MD5");
-                    String email = emailCursor.getString(emailCursor.getColumnIndex(ContactsContract.CommonDataKinds.Email.ADDRESS));
-                    String authority = Base64.encodeToString(digest.digest(("email:" + email).getBytes()), Base64.NO_WRAP);
-                    emailHash.add(authority);
-                }
-                catch (Exception e) {
-                }
-            }
-            if (emailCursor != null)
-                emailCursor.close();
-        }
-        if (c != null)
-            c.close();
-
+        HashSet<String> emailHash = Helper.findEmailsForNumber(this, address);
         if (emailHash.size() == 0) {
             ret.setComplete(new Exception("no emails"));
             return ret;
         }
+
+        JsonObject post = new JsonObject();
+        JsonArray authorities = new JsonArray();
+        post.add("authorities", authorities);
+        post.addProperty("endpoint", address);
 
         for (String authority: emailHash) {
             authorities.add(new JsonPrimitive(authority));
@@ -362,54 +449,35 @@ public class MiddlewareService extends android.app.Service {
         return createRegistration(address);
     }
 
-    void parseGcmText(final Registration registration, final String payload, final String from) {
-        new Thread() {
-            @Override
-            public void run() {
-                GcmText gcmText = GcmText.parse(payload, keyPair.getPrivate(), registration);
-                if (gcmText != null) {
-                    try {
-                        smsTransport.synthesizeMessages(gcmText.destAddr, gcmText.scAddr, gcmText.texts, System.currentTimeMillis());
-                    }
-                    catch (Exception ex) {
-                        ex.printStackTrace();
-                    }
-                }
-            }
-        }.start();
-    }
-
     @Override
     public int onStartCommand(final Intent intent, int flags, int startId) {
-        if (intent != null) {
-            if ("com.google.android.c2dm.intent.RECEIVE".equals(intent.getAction())) {
-                String messageType = gcm.getMessageType(intent);
-                if (GoogleCloudMessaging.MESSAGE_TYPE_MESSAGE.equals(messageType)) {
-                    final String payload = intent.getStringExtra("p");
-                    final String from = intent.getStringExtra("f");
-                    if (from == null)
-                        return START_STICKY;
-                    findOrCreateRegistration(from)
-                    .addCallback(new FutureCallback<Registration>() {
-                        @Override
-                        public void onCompleted(Exception e, Registration result) {
-                            if (result == null || !result.isRegistered())
-                                return;
-                            parseGcmText(result, payload, from);
-                        }
-                    });
-                }
-            }
-            else if (ACTION_REGISTER.equals(intent.getAction())) {
-                registerEndpoints();
+        if (intent == null)
+            return START_STICKY;
+
+        if ("com.google.android.c2dm.intent.RECEIVE".equals(intent.getAction())) {
+            String messageType = gcm.getMessageType(intent);
+            if (GoogleCloudMessaging.MESSAGE_TYPE_MESSAGE.equals(messageType)) {
+                final String payload = intent.getStringExtra("p");
+                final String from = intent.getStringExtra("f");
+                if (from == null || payload == null)
+                    return START_STICKY;
+                findOrCreateRegistration(from)
+                .addCallback(new FutureCallback<Registration>() {
+                    @Override
+                    public void onCompleted(Exception e, Registration result) {
+                        if (result == null || !result.isRegistered())
+                            return;
+                        findOrCreateGcmSocket(result).onGcmMessage(payload, from);
+                    }
+                });
             }
         }
-
+        else if (ACTION_REGISTER.equals(intent.getAction())) {
+            registerEndpoints();
+        }
 
         return START_STICKY;
     }
-
-    public static final String ACTION_REGISTER = "org.cyanogenmod.intent.action.REGISTER";
 
     private String getNumber() {
         final TelephonyManager tm = (TelephonyManager) getSystemService(TELEPHONY_SERVICE);
@@ -443,7 +511,7 @@ public class MiddlewareService extends android.app.Service {
         post.addProperty("public_exponent", Base64.encodeToString(rsaPublicKeySpec.getPublicExponent().toByteArray(), Base64.NO_WRAP));
 
         Ion.with(MiddlewareService.this)
-        .load("https://cmmessaging.appspot.com/api/v1/register")
+        .load(REGISTER_URL)
         .setJsonObjectBody(post)
         .asJsonObject()
         .setCallback(new FutureCallback<JsonObject>() {

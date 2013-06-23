@@ -13,13 +13,13 @@ import java.security.spec.RSAPublicKeySpec;
 /**
  * Created by koush on 6/22/13.
  */
-class Registration {
-    PublicKey remotePublicKey;
-    long date;
-    String registrationId;
-    String endpoint;
-    int remoteSequenceNumber;
-    int localSequenceNumber;
+public class Registration {
+    public PublicKey remotePublicKey;
+    public long date;
+    public String registrationId;
+    public String endpoint;
+    public int remoteSequenceNumber;
+    public int localSequenceNumber;
 
     public boolean isRegistered() {
         return date > 0;

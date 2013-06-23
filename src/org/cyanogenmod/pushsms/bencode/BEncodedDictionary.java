@@ -145,6 +145,8 @@ public class BEncodedDictionary {
     }
 
     public void put(String key, Object value) {
+        if (value == null)
+            return;
         if (value instanceof String)
             value = value.toString().getBytes();
         dict.put(key, value);
