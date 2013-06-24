@@ -8,6 +8,7 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.os.Handler;
 import android.os.IBinder;
+import android.os.PowerManager;
 import android.os.RemoteException;
 import android.telephony.PhoneNumberUtils;
 import android.telephony.SmsManager;
@@ -205,9 +206,18 @@ public class MiddlewareService extends android.app.Service {
         });
     }
 
+    PowerManager.WakeLock wakeLock;
+    private void createWakelock() {
+        PowerManager pm = (PowerManager)getSystemService(POWER_SERVICE);
+        wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "SMSDispatcher");
+        wakeLock.setReferenceCounted(true);
+    }
+
     @Override
     public void onCreate() {
         super.onCreate();
+
+        createWakelock();
 
         settings = getSharedPreferences("settings", MODE_PRIVATE);
         accounts = getSharedPreferences("accounts", MODE_PRIVATE);
@@ -574,6 +584,8 @@ public class MiddlewareService extends android.app.Service {
             return START_STICKY;
 
         if ("com.google.android.c2dm.intent.RECEIVE".equals(intent.getAction())) {
+            // keep us alive for 10 seconds to ack any incoming message
+            wakeLock.acquire(10000);
             String messageType = gcm.getMessageType(intent);
             if (GoogleCloudMessaging.MESSAGE_TYPE_MESSAGE.equals(messageType)) {
                 final String payload = intent.getStringExtra("p");

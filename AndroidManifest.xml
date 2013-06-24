@@ -19,11 +19,12 @@
     <uses-permission android:name="android.permission.USE_CREDENTIALS" />
     <uses-permission android:name="android.permission.GET_ACCOUNTS" />
     <uses-permission android:name="android.permission.READ_CONTACTS" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
 
     <uses-permission android:name="android.permission.INTERCEPT_SMS" />
     <uses-permission android:name="android.permission.BROADCAST_SMS" />
 
-    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
 
     <application
             android:theme="@android:style/Theme.Holo.DialogWhenLarge"
