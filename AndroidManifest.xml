@@ -52,7 +52,7 @@
 
         <service android:name=".MiddlewareService" />
         <activity
-                android:name="MyActivity"
+                android:name=".MyActivity"
                 android:label="@string/app_name">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>

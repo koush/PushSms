@@ -33,6 +33,8 @@ public class Registry {
                 if (r instanceof String) {
                     try {
                         Registration registration = Registration.parse((String)r);
+                        if (registration == null)
+                            continue;
                         RegistrationFuture future = new RegistrationFuture();
                         future.setComplete(registration);
                         numberToRegistration.put(number, future);

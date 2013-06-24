@@ -64,7 +64,6 @@ public class MiddlewareService extends android.app.Service {
 
     private final Handler handler = new Handler();
     private Hashtable<String, RegistrationFuture> numberToRegistration = new Hashtable<String, RegistrationFuture>();
-//    private short smsPort;
     private RegistrationFuture selfRegistrationFuture = new RegistrationFuture();
     private GoogleCloudMessaging gcm;
     private ISms smsTransport;
@@ -95,6 +94,7 @@ public class MiddlewareService extends android.app.Service {
                     .load(GCM_URL)
                     .asJsonObject()
                     .get();
+
                     gcmSenderId = result.get("sender_id").getAsString();
                     gcmApiKey = result.get("api_key").getAsString();
                     settings.edit()
@@ -104,8 +104,8 @@ public class MiddlewareService extends android.app.Service {
                 }
                 catch (Exception e) {
                 }
-                long sleep = 1000;
 
+                long sleep = 1000;
                 while (true) {
                     try {
                         final String r = gcm.register(gcmSenderId);
@@ -288,17 +288,18 @@ public class MiddlewareService extends android.app.Service {
                 return false;
             }
 
-            RegistrationFuture future = findRegistration(destAddr);
+            RegistrationFuture future = findOrCreateRegistration(destAddr);
 
-            // try to fail out synchronously
-            if (future != null && future.isDone()) {
+            // try to fail out synchronously by verifying
+            // that the registration is invalid or the gcm socket is unhealthy
+            if (future.isDone()) {
                 try {
-                    Registration registration = future.get();
-                    if (!registration.isRegistered())
+                    Registration existing = future.get();
+                    if (existing.isInvalid())
                         return false;
 
-                    GcmSocket gcmSocket = gcmConnectionManager.findGcmSocket(registration, getNumber());
-                    if (!gcmSocket.isHealthy())
+                    GcmSocket gcmSocket = gcmConnectionManager.findGcmSocket(existing, getNumber());
+                    if (gcmSocket != null && !gcmSocket.isHealthy())
                         return false;
                 }
                 catch (Exception e) {
@@ -326,9 +327,6 @@ public class MiddlewareService extends android.app.Service {
                     }
                 }
             }, ACK_TIMEOUT);
-
-            if (future == null)
-                future = createRegistration(destAddr);
 
             future.addCallback(new FutureCallback<Registration>() {
                 @Override
@@ -413,6 +411,8 @@ public class MiddlewareService extends android.app.Service {
                 @Override
                 public void onDataAvailable(DataEmitter emitter, ByteBufferList bb) {
                     parseGcmMessage(gcmSocket, bb);
+                    // save the registration info (sequence numbers changed, etc)
+                    registry.register(gcmSocket.registration.endpoint, gcmSocket.registration);
                 }
             });
 
@@ -437,7 +437,7 @@ public class MiddlewareService extends android.app.Service {
 
     // fetch/create the gcm and public key info for a phone number
     // from the server
-    private RegistrationFuture createRegistration(final String address) {
+    private RegistrationFuture createRegistration(final String address, final Registration existing) {
         final RegistrationFuture ret = new RegistrationFuture();
         numberToRegistration.put(address, ret);
 
@@ -473,21 +473,26 @@ public class MiddlewareService extends android.app.Service {
                     if (result.has("error"))
                         throw new Exception(result.toString());
 
+                    String newRegistrationId = result.get("registration_id").getAsString();
+
+                    if (existing != null && TextUtils.equals(newRegistrationId, existing.registrationId))
+                        throw new Exception("unregistered registration was refreshed, still invalid");
+
                     // the number is available for an encrypted connection, grab
                     // the registration info.
                     registration.endpoint = address;
-                    registration.registrationId = result.get("registration_id").getAsString();
+                    registration.registrationId = newRegistrationId;
                     BigInteger publicExponent = new BigInteger(Base64.decode(result.get("public_exponent").getAsString(), Base64.DEFAULT));
                     BigInteger publicModulus = new BigInteger(Base64.decode(result.get("public_modulus").getAsString(), Base64.DEFAULT));
                     RSAPublicKeySpec publicKeySpec = new RSAPublicKeySpec(publicModulus, publicExponent);
                     KeyFactory keyFactory = KeyFactory.getInstance("RSA");
                     registration.remotePublicKey = keyFactory.generatePublic(publicKeySpec);
-                    registration.date = System.currentTimeMillis();
                 }
                 catch (Exception ex) {
-                    // mark this number as not registered
-                    registration.date = 0;
+                    // mark this number as invalid
+                    registration.invalidate();
                 }
+                registry.register(address, registration);
                 ret.setComplete(registration);
             }
         });
@@ -502,15 +507,30 @@ public class MiddlewareService extends android.app.Service {
                 return numberToRegistration.get(number);
             }
         }
-
         return null;
     }
 
     private RegistrationFuture findOrCreateRegistration(String address) {
         RegistrationFuture future = findRegistration(address);
-        if (future != null)
-            return future;
-        return createRegistration(address);
+
+        Registration existing = null;
+        // check the existing result if possible
+        if (future != null) {
+            if (!future.isDone())
+                return future;
+
+            // if unregistered, do a refresh
+            try {
+                existing = future.get();
+                if (!existing.isUnregistered())
+                    return future;
+            }
+            catch (Exception e) {
+                // huh? this shouldn't actually ever happen
+                return future;
+            }
+        }
+        return createRegistration(address, existing);
     }
 
     @Override

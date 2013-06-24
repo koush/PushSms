@@ -28,6 +28,7 @@ import com.google.android.gms.auth.GoogleAuthUtil;
 import com.google.android.gms.auth.GooglePlayServicesAvailabilityException;
 import com.google.android.gms.auth.UserRecoverableAuthException;
 import com.google.android.gms.common.GooglePlayServicesUtil;
+import com.google.android.gms.gcm.GoogleCloudMessaging;
 
 import java.io.IOException;
 
@@ -160,8 +161,16 @@ public class MyActivity extends Activity {
         button.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-//                SmsManager.getDefault().sendDataMessage("2064951490", null, Short.valueOf(getString(R.string.sms_port)), new byte[100], null, null);
-                SmsManager.getDefault().sendTextMessage("2064228017", null, "hello world " + System.currentTimeMillis(), null, null);
+                new Thread() {
+                    @Override
+                    public void run() {
+                        try {
+                            GoogleCloudMessaging.getInstance(MyActivity.this).unregister();
+                        }
+                        catch (Exception e) {
+                        }
+                    }
+                }.start();
             }
         });
     }

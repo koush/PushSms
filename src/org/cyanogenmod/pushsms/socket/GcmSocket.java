@@ -26,6 +26,8 @@ import java.nio.ByteBuffer;
 import java.security.PrivateKey;
 import java.security.SecureRandom;
 import java.security.Signature;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Random;
 
 import javax.crypto.Cipher;
@@ -39,7 +41,7 @@ public class GcmSocket extends FilteredDataEmitter implements AsyncSocket {
     private static final String LOGTAG = "GCMSocket";
     AsyncServer server;
     Context context;
-    Registration registration;
+    public Registration registration;
     PrivateKey privateKey;
     String from;
     String gcmApiKey;
@@ -117,12 +119,16 @@ public class GcmSocket extends FilteredDataEmitter implements AsyncSocket {
 
             BEncodedDictionary envelope = BEncodedDictionary.parseDictionary(signedEnvelope);
 
-            int seq = envelope.getInt("seq");
-            if (registration.remoteSequenceNumber < seq) {
+            int seq = envelope.getInt("lsn");
+            if (registration.remoteSequenceNumber <= seq) {
                 // wtf? replay attack?
                 // how to handle? Ignore? prompt?
             }
             registration.remoteSequenceNumber = seq;
+
+            // the remote end will send us what they think our local sequence number is... just use
+            // the max of the two
+            registration.localSequenceNumber = Math.max(envelope.getInt("rsn"), registration.localSequenceNumber);
 
             Util.emitAllData(this, new ByteBufferList(envelope.getBytes("p")));
         }
@@ -154,8 +160,11 @@ public class GcmSocket extends FilteredDataEmitter implements AsyncSocket {
             BEncodedDictionary envelope = new BEncodedDictionary();
             // plop in the data we want to deliver
             envelope.put("p", bb.getAllByteArray());
-            // and include a sequence number to prevent replay attacks
-            envelope.put("seq", registration.localSequenceNumber++);
+            // include a sequence number to prevent replay attacks
+            envelope.put("lsn", registration.localSequenceNumber++);
+            // let the other end know what their sequence number is
+            // just in case we're out of sync
+            envelope.put("rsn", registration.remoteSequenceNumber);
 
             // sign the data so authenticity can be verified
             BEncodedDictionary signedMessage = new BEncodedDictionary();
@@ -207,13 +216,18 @@ public class GcmSocket extends FilteredDataEmitter implements AsyncSocket {
             .load("https://android.googleapis.com/gcm/send")
             .setHeader("Authorization", "key=" + gcmApiKey)
             .setJsonObjectBody(post)
-            .as(GcmResult.class)
-            .setCallback(new FutureCallback<GcmResult>() {
+            .as(GcmResults.class)
+            .setCallback(new FutureCallback<GcmResults>() {
                 @Override
-                public void onCompleted(Exception e, GcmResult result) {
+                public void onCompleted(Exception e, GcmResults result) {
                     if (result == null || result.failure != 0 || result.success == 0) {
-                        if (e == null)
+                        if (e == null) {
                             e = new Exception("gcm server failure");
+                            // if registered, mark it as unregistered
+                            // to trigger a refresh
+                            if (registration.isRegistered())
+                                registration.unregister();
+                        }
                         report(e);
                         return;
                     }
@@ -227,12 +241,25 @@ public class GcmSocket extends FilteredDataEmitter implements AsyncSocket {
         }
     }
 
+    public static class GcmUnregisteredException extends Exception {
+    }
+
     public static class GcmResult {
+        @SerializedName("message_id")
+        String messageId;
+        @SerializedName("error")
+        String error;
+    }
+
+    public static class GcmResults {
         @SerializedName("failure")
         int failure;
 
         @SerializedName("success")
         int success;
+
+        @SerializedName("results")
+        ArrayList<GcmResult> results = new ArrayList<GcmResult>();
     }
 
     @Override

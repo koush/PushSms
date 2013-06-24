@@ -14,55 +14,85 @@ import java.security.spec.RSAPublicKeySpec;
  * Created by koush on 6/22/13.
  */
 public class Registration {
+    public static final int STATE_REGISTERED = 0;
+    public static final int STATE_UNREGISTERED = 1;
+    public static final int STATE_INVALID = 2;
+
     public PublicKey remotePublicKey;
-    public long date;
+    private long date = System.currentTimeMillis();
     public String registrationId;
     public String endpoint;
     public int remoteSequenceNumber;
     public int localSequenceNumber;
+    public int state = STATE_REGISTERED;
 
     public boolean isRegistered() {
-        return date > 0;
+        return state == STATE_REGISTERED;
+    }
+
+    public boolean isUnregistered() {
+        return state == STATE_UNREGISTERED;
+    }
+
+    public boolean isInvalid() {
+        return state == STATE_INVALID;
+    }
+
+    public void invalidate() {
+        state = STATE_INVALID;
+    }
+
+    public void unregister() {
+        state = STATE_UNREGISTERED;
     }
 
     static Registration parse(String data) {
         try {
             byte[] bytes = Base64.decode(data, Base64.NO_WRAP);
-            KeyFactory keyFactory = KeyFactory.getInstance("RSA");
             BEncodedDictionary dict = BEncodedDictionary.parseDictionary(ByteBuffer.wrap(bytes));
 
             Registration ret = new Registration();
             ret.date = dict.getLong("date");
             ret.registrationId = dict.getString("registration_id");
             ret.endpoint = dict.getString("endpoint");
+            ret.localSequenceNumber = dict.getInt("local_sequence_number");
+            ret.remoteSequenceNumber = dict.getInt("remote_sequence_number");
+            ret.state = dict.getInt("state");
 
-            RSAPublicKeySpec rsaPublicKeySpec = new RSAPublicKeySpec(
-                    new BigInteger(dict.getBytes("public_modulus")),
-                    new BigInteger(dict.getBytes("public_exponent")));
+            byte[] publicModulus = dict.getBytes("public_modulus");
+            byte[] publicExponent = dict.getBytes("public_exponent");
+            if (publicModulus != null && publicExponent != null) {
+                KeyFactory keyFactory = KeyFactory.getInstance("RSA");
+                RSAPublicKeySpec rsaPublicKeySpec = new RSAPublicKeySpec(
+                new BigInteger(publicModulus),
+                new BigInteger(publicExponent));
 
-            ret.remotePublicKey = keyFactory.generatePublic(rsaPublicKeySpec);
+                ret.remotePublicKey = keyFactory.generatePublic(rsaPublicKeySpec);
+            }
 
             return ret;
-
         }
         catch (Exception e) {
             return null;
         }
-
     }
 
     public String encode() {
         try {
             BEncodedDictionary dict = new BEncodedDictionary();
 
-            KeyFactory keyFactory = KeyFactory.getInstance("RSA");
-
-            RSAPublicKeySpec publicKeySpec = keyFactory.getKeySpec(remotePublicKey, RSAPublicKeySpec.class);
-            dict.put("public_modulus", publicKeySpec.getModulus().toByteArray());
-            dict.put("public_exponent", publicKeySpec.getPublicExponent().toByteArray());
+            if (remotePublicKey != null) {
+                KeyFactory keyFactory = KeyFactory.getInstance("RSA");
+                RSAPublicKeySpec publicKeySpec = keyFactory.getKeySpec(remotePublicKey, RSAPublicKeySpec.class);
+                dict.put("public_modulus", publicKeySpec.getModulus().toByteArray());
+                dict.put("public_exponent", publicKeySpec.getPublicExponent().toByteArray());
+            }
+            dict.put("state", state);
             dict.put("date", date);
             dict.put("endpoint", endpoint);
             dict.put("registration_id", registrationId);
+            dict.put("local_sequence_number", localSequenceNumber);
+            dict.put("remote_sequence_number", remoteSequenceNumber);
 
             return Base64.encodeToString(dict.toByteArray(), Base64.NO_WRAP);
         }
