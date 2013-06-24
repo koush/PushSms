@@ -17,6 +17,7 @@ public class Registration {
     public static final int STATE_REGISTERED = 0;
     public static final int STATE_UNREGISTERED = 1;
     public static final int STATE_INVALID = 2;
+    public static final int STATE_NEEDS_REFRESH = 3;
 
     public PublicKey remotePublicKey;
     private long date = System.currentTimeMillis();
@@ -44,6 +45,10 @@ public class Registration {
 
     public void unregister() {
         state = STATE_UNREGISTERED;
+    }
+
+    public void refresh() {
+        state = STATE_NEEDS_REFRESH;
     }
 
     static Registration parse(String data) {

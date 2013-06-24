@@ -234,6 +234,10 @@ public class MiddlewareService extends android.app.Service {
     // this is the middleware that processes all outgoing messages
     // as they enter the SmsManager
     ISmsMiddleware.Stub stub = new ISmsMiddleware.Stub() {
+        public void logd(String string) {
+            Log.d(LOGTAG, "on*Text " + string);
+        }
+
         @Override
         public boolean onSendText(String destAddr, String scAddr, String text, PendingIntent sentIntent, PendingIntent deliveryIntent) throws RemoteException {
             List<PendingIntent> sentIntents = null;
@@ -258,14 +262,20 @@ public class MiddlewareService extends android.app.Service {
         }
 
         public boolean onSendMultipartText(String destAddr, String scAddr, List<String> texts, final List<PendingIntent> sentIntents, final List<PendingIntent> deliveryIntents, boolean multipart) throws RemoteException {
-            if (keyPair == null)
+            if (keyPair == null) {
+                logd("no keypair");
                 return false;
+            }
 
-            if (!selfRegistrationFuture.isDone())
+            if (!selfRegistrationFuture.isDone()) {
+                logd("awaiting gcm registration");
                 return false;
+            }
 
-            if (gcmConnectionManager == null)
+            if (gcmConnectionManager == null) {
+                logd("no gcm connection manager available");
                 return false;
+            }
 
             // compute a deterministic message id
             StringBuilder builder = new StringBuilder();
@@ -285,6 +295,7 @@ public class MiddlewareService extends android.app.Service {
             // see if this one failed delivery, and just ignore it
             if (messagesAwaitingAck.containsKey(lookup)) {
                 messagesAwaitingAck.remove(lookup);
+                logd("resending failed message");
                 return false;
             }
 
@@ -295,14 +306,19 @@ public class MiddlewareService extends android.app.Service {
             if (future.isDone()) {
                 try {
                     Registration existing = future.get();
-                    if (existing.isInvalid())
+                    if (existing.isInvalid()) {
+                        logd("invalid registration");
                         return false;
+                    }
 
                     GcmSocket gcmSocket = gcmConnectionManager.findGcmSocket(existing, getNumber());
-                    if (gcmSocket != null && !gcmSocket.isHealthy())
+                    if (gcmSocket != null && !gcmSocket.isHealthy()) {
+                        logd("unhealthy gcm socket");
                         return false;
+                    }
                 }
                 catch (Exception e) {
+                    Log.e(LOGTAG, "unexpected exception checking future?", e);
                     return false;
                 }
             }
@@ -318,12 +334,20 @@ public class MiddlewareService extends android.app.Service {
             sendText.sentIntents = sentIntents;
 
             messagesAwaitingAck.put(lookupFinal, sendText);
-            Ion.getDefault(MiddlewareService.this).getServer().postDelayed(new Runnable() {
+            handler.postDelayed(new Runnable() {
                 @Override
                 public void run() {
                     // if not acked, attempt normal delivery
                     if (messagesAwaitingAck.containsKey(lookupFinal)) {
+                        Log.e(LOGTAG, "Timeout awaiting ack of sms");
                         sendText.manageFailure(handler, smsManager);
+
+                        GcmSocket gcmSocket = gcmConnectionManager.findGcmSocket(sendText.destAddr);
+                        if (gcmSocket != null) {
+                            Log.e(LOGTAG, "Marking GCM socket failure");
+                            gcmSocket.fail();
+                            registry.register(gcmSocket.registration.endpoint, gcmSocket.registration);
+                        }
                     }
                 }
             }, ACK_TIMEOUT);
@@ -435,6 +459,10 @@ public class MiddlewareService extends android.app.Service {
         return ret;
     }
 
+    private void logd(String string) {
+        Log.d(LOGTAG, string);
+    }
+
     // fetch/create the gcm and public key info for a phone number
     // from the server
     private RegistrationFuture createRegistration(final String address, final Registration existing) {
@@ -460,6 +488,7 @@ public class MiddlewareService extends android.app.Service {
             authorities.add(new JsonPrimitive(authority));
         }
 
+        logd("Fetching registration for " + address);
         Ion.with(this)
         .load(FIND_URL)
         .setJsonObjectBody(post)
@@ -475,9 +504,6 @@ public class MiddlewareService extends android.app.Service {
 
                     String newRegistrationId = result.get("registration_id").getAsString();
 
-                    if (existing != null && TextUtils.equals(newRegistrationId, existing.registrationId))
-                        throw new Exception("unregistered registration was refreshed, still invalid");
-
                     // the number is available for an encrypted connection, grab
                     // the registration info.
                     registration.endpoint = address;
@@ -487,13 +513,22 @@ public class MiddlewareService extends android.app.Service {
                     RSAPublicKeySpec publicKeySpec = new RSAPublicKeySpec(publicModulus, publicExponent);
                     KeyFactory keyFactory = KeyFactory.getInstance("RSA");
                     registration.remotePublicKey = keyFactory.generatePublic(publicKeySpec);
+
+                    logd("Registration complete for " + registration.endpoint);
+
+                    if (existing != null && existing.isUnregistered() && TextUtils.equals(newRegistrationId, existing.registrationId))
+                        throw new Exception("unregistered registration was refreshed, still invalid");
                 }
                 catch (Exception ex) {
                     // mark this number as invalid
+                    Log.e(LOGTAG, "registration fetch failure", ex);
                     registration.invalidate();
                 }
                 registry.register(address, registration);
                 ret.setComplete(registration);
+
+                if (gcmConnectionManager != null)
+                    gcmConnectionManager.remove(address);
             }
         });
 
@@ -519,10 +554,10 @@ public class MiddlewareService extends android.app.Service {
             if (!future.isDone())
                 return future;
 
-            // if unregistered, do a refresh
+            // if unregistered or needing a refresh, do a refresh
             try {
                 existing = future.get();
-                if (!existing.isUnregistered())
+                if (existing.isRegistered() || existing.isInvalid())
                     return future;
             }
             catch (Exception e) {
@@ -545,11 +580,20 @@ public class MiddlewareService extends android.app.Service {
                 final String from = intent.getStringExtra("f");
                 if (from == null || payload == null)
                     return START_STICKY;
+
+                // if we get a message from a number that we previously thought
+                // was not in commission, force a refresh to get the new info, if any.
+                if (gcmConnectionManager != null) {
+                    GcmSocket existing = gcmConnectionManager.findGcmSocket(from);
+                    if (existing != null && existing.registration.isInvalid())
+                        existing.registration.refresh();
+                }
+
                 findOrCreateRegistration(from)
                 .addCallback(new FutureCallback<Registration>() {
                     @Override
                     public void onCompleted(Exception e, Registration result) {
-                        if (result == null || !result.isRegistered())
+                        if (result == null)
                             return;
                         findOrCreateGcmSocket(result).onGcmMessage(payload, from);
                     }

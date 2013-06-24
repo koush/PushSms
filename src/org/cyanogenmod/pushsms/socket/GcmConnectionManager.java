@@ -25,14 +25,27 @@ public class GcmConnectionManager {
     }
 
     public GcmSocket findGcmSocket(Registration registration, String from) {
+        GcmSocket gcmSocket = findGcmSocket(registration.endpoint);
+        if (gcmSocket == null)
+            return null;
+        gcmSocket.from = from;
+        return gcmSocket;
+    }
+
+    public GcmSocket findGcmSocket(String number) {
         for (GcmSocket gcmSocket: gcmSockets) {
-            if (PhoneNumberUtils.compare(context, registration.endpoint, gcmSocket.getNumber())) {
-                gcmSocket.from = from;
+            if (PhoneNumberUtils.compare(context, number, gcmSocket.getNumber())) {
                 return gcmSocket;
             }
         }
 
         return null;
+    }
+
+    public void remove(String number) {
+        GcmSocket gcmSocket = findGcmSocket(number);
+        if (gcmSocket != null)
+            gcmSockets.remove(gcmSocket);
     }
 
     public GcmSocket createGcmSocket(Registration registration, String from) {

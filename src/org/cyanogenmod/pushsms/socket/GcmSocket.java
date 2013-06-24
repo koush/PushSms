@@ -71,16 +71,20 @@ public class GcmSocket extends FilteredDataEmitter implements AsyncSocket {
         return nextAllowedAttempt < System.currentTimeMillis();
     }
 
+    public void fail() {
+        // see if we're already backing off from an error
+        if (nextAllowedAttempt > System.currentTimeMillis())
+            return;
+        nextAllowedAttempt = System.currentTimeMillis() + currentBackoff;
+        currentBackoff *= 2;
+        // backoff max is an hour
+        currentBackoff = Math.max(currentBackoff, 60L * 60L * 1000L);
+    }
+
     @Override
     protected void report(Exception e) {
         if (e != null) {
-            // see if we're already backing off from an error
-            if (nextAllowedAttempt > System.currentTimeMillis())
-                return;
-            nextAllowedAttempt = System.currentTimeMillis() + currentBackoff;
-            currentBackoff *= 2;
-            // backoff max is an hour
-            currentBackoff = Math.max(currentBackoff, 60L * 60L * 1000L);
+            fail();
         }
 
         super.report(e);
@@ -112,8 +116,11 @@ public class GcmSocket extends FilteredDataEmitter implements AsyncSocket {
             Signature verifier = Signature.getInstance("SHA1withRSA");
             verifier.initVerify(registration.remotePublicKey);
             verifier.update(signedEnvelope);
-            if (!verifier.verify(signature))
+            if (!verifier.verify(signature)) {
+                // keys or something changed? force a server refresh
+                registration.refresh();
                 throw new Exception("unable to verify signature");
+            }
 
             originatingNumber = from;
 
