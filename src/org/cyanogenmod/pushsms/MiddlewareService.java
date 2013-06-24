@@ -6,12 +6,9 @@ import android.app.Activity;
 import android.app.PendingIntent;
 import android.content.Intent;
 import android.content.SharedPreferences;
-import android.database.Cursor;
-import android.net.Uri;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.RemoteException;
-import android.provider.ContactsContract;
 import android.telephony.PhoneNumberUtils;
 import android.telephony.SmsManager;
 import android.telephony.TelephonyManager;
@@ -87,11 +84,28 @@ public class MiddlewareService extends android.app.Service {
     private static final String FIND_URL = SERVER_API_URL + "/find";
     private static final String REGISTER_URL = SERVER_API_URL + "/register";
 
-    private void registerGcm() {
+    // get the sender id and authorization keys from the cmmesaging server,
+    // then register with google play services
+    private void getGcmInfo() {
         new Thread() {
             @Override
             public void run() {
+                try {
+                    JsonObject result = Ion.with(MiddlewareService.this)
+                    .load(GCM_URL)
+                    .asJsonObject()
+                    .get();
+                    gcmSenderId = result.get("sender_id").getAsString();
+                    gcmApiKey = result.get("api_key").getAsString();
+                    settings.edit()
+                    .putString("gcm_sender_id", gcmSenderId)
+                    .putString("gcm_api_key", gcmApiKey)
+                    .commit();
+                }
+                catch (Exception e) {
+                }
                 long sleep = 1000;
+
                 while (true) {
                     try {
                         final String r = gcm.register(gcmSenderId);
@@ -116,32 +130,7 @@ public class MiddlewareService extends android.app.Service {
         }.start();
     }
 
-    private void getGcmInfo() {
-        Ion.with(this)
-        .load(GCM_URL)
-        .asJsonObject()
-        .setCallback(new FutureCallback<JsonObject>() {
-            @Override
-            public void onCompleted(Exception e, JsonObject result) {
-                try {
-                    if (e != null)
-                        throw e;
-                    gcmSenderId = result.get("sender_id").getAsString();
-                    gcmApiKey = result.get("api_key").getAsString();
-                    settings.edit()
-                    .putString("gcm_sender_id", gcmSenderId)
-                    .putString("gcm_api_key", gcmApiKey)
-                    .commit();
-                }
-                catch (Exception ex) {
-                }
-                finally {
-                    registerGcm();
-                }
-            }
-        });
-    }
-
+    // hook into sms manager to intercept outgoing sms
     private void registerSmsMiddleware() {
         try {
             Class sm = Class.forName("android.os.ServiceManager");
@@ -154,6 +143,7 @@ public class MiddlewareService extends android.app.Service {
         }
     }
 
+    // create/read the keypair as necessary
     private void getOrCreateKeyPair() {
         String encodedKeyPair = settings.getString("keypair", null);
         if (encodedKeyPair != null) {
@@ -241,6 +231,8 @@ public class MiddlewareService extends android.app.Service {
             registerEndpoints();
     }
 
+    // this is the middleware that processes all outgoing messages
+    // as they enter the SmsManager
     ISmsMiddleware.Stub stub = new ISmsMiddleware.Stub() {
         @Override
         public boolean onSendText(String destAddr, String scAddr, String text, PendingIntent sentIntent, PendingIntent deliveryIntent) throws RemoteException {
@@ -296,14 +288,6 @@ public class MiddlewareService extends android.app.Service {
                 return false;
             }
 
-            final GcmText sendText = new GcmText();
-            sendText.destAddr = destAddr;
-            sendText.scAddr = scAddr;
-            sendText.texts.addAll(texts);
-            sendText.multipart = multipart;
-            sendText.deliveryIntents = deliveryIntents;
-            sendText.sentIntents = sentIntents;
-
             RegistrationFuture future = findRegistration(destAddr);
 
             // try to fail out synchronously
@@ -321,6 +305,16 @@ public class MiddlewareService extends android.app.Service {
                     return false;
                 }
             }
+
+            // construct a text that we can attempt to send,
+            // once we determine how to reach the number
+            final GcmText sendText = new GcmText();
+            sendText.destAddr = destAddr;
+            sendText.scAddr = scAddr;
+            sendText.texts.addAll(texts);
+            sendText.multipart = multipart;
+            sendText.deliveryIntents = deliveryIntents;
+            sendText.sentIntents = sentIntents;
 
             messagesAwaitingAck.put(lookupFinal, sendText);
             Ion.getDefault(MiddlewareService.this).getServer().postDelayed(new Runnable() {
@@ -367,50 +361,62 @@ public class MiddlewareService extends android.app.Service {
         }
     }
 
+    private void parseGcmMessage(GcmSocket gcmSocket, ByteBufferList bb) {
+        try {
+            BEncodedDictionary message = BEncodedDictionary.parseDictionary(bb.getAllByteArray());
+            String messageType = message.getString("t");
+
+            if (MessageTypes.MESSAGE.equals(messageType)) {
+                // incoming text
+                GcmText gcmText = GcmText.parse(gcmSocket, message);
+                if (gcmText == null)
+                    return;
+
+                // ack the message
+                String messageId = message.getString("id");
+                if (messageId != null) {
+                    BEncodedDictionary ack = new BEncodedDictionary();
+                    ack.put("t", MessageTypes.ACK);
+                    ack.put("id", messageId);
+                    gcmSocket.write(new ByteBufferList(ack.toByteArray()));
+                }
+
+                // synthesize a fake message for the android system
+                smsTransport.synthesizeMessages(gcmSocket.getNumber(), gcmText.scAddr, gcmText.texts, System.currentTimeMillis());
+            }
+            else if (MessageTypes.ACK.equals(messageType)) {
+                // incoming ack
+                String messageId = message.getString("id");
+                if (messageId == null)
+                    return;
+                GcmText gcmText = messagesAwaitingAck.remove(messageId);
+                if (gcmText == null)
+                    return;
+                firePendingIntents(gcmText.sentIntents);
+                firePendingIntents(gcmText.deliveryIntents);
+            }
+        }
+        catch (Exception e) {
+            Log.e(LOGTAG, "Error handling GCM socket message", e);
+        }
+    }
+
+    // given a registration, find/create the gcm socket that manages
+    // the secure connection between the two devices.
     private GcmSocket findOrCreateGcmSocket(Registration registration) {
         GcmSocket ret = gcmConnectionManager.findGcmSocket(registration, getNumber());
         if (ret == null) {
             final GcmSocket gcmSocket = ret = gcmConnectionManager.createGcmSocket(registration, getNumber());
+
+            // parse data from the gcm connection as we get it
             ret.setDataCallback(new DataCallback() {
                 @Override
                 public void onDataAvailable(DataEmitter emitter, ByteBufferList bb) {
-                    try {
-                        BEncodedDictionary message = BEncodedDictionary.parseDictionary(bb.getAllByteArray());
-                        String messageType = message.getString("t");
-                        if (MessageTypes.MESSAGE.equals(messageType)) {
-                            GcmText gcmText = GcmText.parse(gcmSocket, message);
-                            if (gcmText == null)
-                                return;
-
-                            // ack the message
-                            String messageId = message.getString("id");
-                            if (messageId != null) {
-                                BEncodedDictionary ack = new BEncodedDictionary();
-                                ack.put("t", MessageTypes.ACK);
-                                ack.put("id", messageId);
-                                gcmSocket.write(new ByteBufferList(ack.toByteArray()));
-                            }
-
-                            // synthesize a fake message for the android system
-                            smsTransport.synthesizeMessages(gcmSocket.getNumber(), gcmText.scAddr, gcmText.texts, System.currentTimeMillis());
-                        }
-                        else if (MessageTypes.ACK.equals(messageType)) {
-                            String messageId = message.getString("id");
-                            if (messageId == null)
-                                return;
-                            GcmText gcmText = messagesAwaitingAck.remove(messageId);
-                            if (gcmText == null)
-                                return;
-                            firePendingIntents(gcmText.sentIntents);
-                            firePendingIntents(gcmText.deliveryIntents);
-                        }
-                    }
-                    catch (Exception e) {
-                        Log.e(LOGTAG, "Error handling GCM socket message", e);
-                    }
+                    parseGcmMessage(gcmSocket, bb);
                 }
             });
 
+            // on error, fail over any pending messages for this number
             ret.setEndCallback(new CompletedCallback() {
                 @Override
                 public void onCompleted(Exception ex) {
@@ -429,10 +435,16 @@ public class MiddlewareService extends android.app.Service {
         return ret;
     }
 
+    // fetch/create the gcm and public key info for a phone number
+    // from the server
     private RegistrationFuture createRegistration(final String address) {
         final RegistrationFuture ret = new RegistrationFuture();
         numberToRegistration.put(address, ret);
 
+        // the server will need to know all the email/number combos when we're attempting
+        // to locate the gcm registration id for a given number.
+        // this will return HASHED emails, not actual emails. this way the server is not privy
+        // to your contact information.
         HashSet<String> emailHash = Helper.findEmailsForNumber(this, address);
         if (emailHash.size() == 0) {
             ret.setComplete(new Exception("no emails"));
@@ -461,6 +473,8 @@ public class MiddlewareService extends android.app.Service {
                     if (result.has("error"))
                         throw new Exception(result.toString());
 
+                    // the number is available for an encrypted connection, grab
+                    // the registration info.
                     registration.endpoint = address;
                     registration.registrationId = result.get("registration_id").getAsString();
                     BigInteger publicExponent = new BigInteger(Base64.decode(result.get("public_exponent").getAsString(), Base64.DEFAULT));
@@ -471,6 +485,7 @@ public class MiddlewareService extends android.app.Service {
                     registration.date = System.currentTimeMillis();
                 }
                 catch (Exception ex) {
+                    // mark this number as not registered
                     registration.date = 0;
                 }
                 ret.setComplete(registration);
@@ -480,6 +495,7 @@ public class MiddlewareService extends android.app.Service {
         return ret;
     }
 
+    // find the gcm info, public key, etc, for a given phone number
     private RegistrationFuture findRegistration(String address) {
         for (String number: numberToRegistration.keySet()) {
             if (PhoneNumberUtils.compare(number, address)) {
@@ -527,6 +543,7 @@ public class MiddlewareService extends android.app.Service {
         return START_STICKY;
     }
 
+    // figure out the number of the user's phone. may be detect automatically or manually entered.
     private String getNumber() {
         final TelephonyManager tm = (TelephonyManager) getSystemService(TELEPHONY_SERVICE);
         String ret = settings.getString("phone_number", tm.getLine1Number());
@@ -535,6 +552,8 @@ public class MiddlewareService extends android.app.Service {
         return ret;
     }
 
+    boolean registering = false;
+    // register our gcm registration id with the cmmessaging server
     void withRegistration(Exception e, final Registration registration) {
         if (registering || e != null)
             return;
@@ -543,10 +562,12 @@ public class MiddlewareService extends android.app.Service {
         post.addProperty("registration_id", registration.registrationId);
         JsonObject tokens = new JsonObject();
         post.add("access_tokens", tokens);
+        // grab all authorized accounts
         for (Account account : AccountManager.get(MiddlewareService.this).getAccountsByType("com.google")) {
             if (accounts.getAll().containsKey(account.name)) {
                 try {
                     String token = GoogleAuthUtil.getToken(MiddlewareService.this, account.name, "oauth2:https://www.googleapis.com/auth/userinfo.email");
+                    // take note whether we want to use this account
                     tokens.addProperty(token, accounts.getBoolean(account.name, false));
                 }
                 catch (Exception ex) {
@@ -554,6 +575,7 @@ public class MiddlewareService extends android.app.Service {
                 }
             }
         }
+        // send up our public key
         post.addProperty("endpoint", getNumber());
         post.addProperty("public_modulus", Base64.encodeToString(rsaPublicKeySpec.getModulus().toByteArray(), Base64.NO_WRAP));
         post.addProperty("public_exponent", Base64.encodeToString(rsaPublicKeySpec.getPublicExponent().toByteArray(), Base64.NO_WRAP));
@@ -573,7 +595,7 @@ public class MiddlewareService extends android.app.Service {
         });
     }
 
-    boolean registering = false;
+    // register our gcm info once we have it
     private void registerEndpoints() {
         selfRegistrationFuture.addCallback(new FutureCallback<Registration>() {
             @Override
