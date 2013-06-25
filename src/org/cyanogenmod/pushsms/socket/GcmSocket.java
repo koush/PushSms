@@ -112,6 +112,7 @@ public class GcmSocket extends FilteredDataEmitter implements AsyncSocket {
                     Cipher cipher = Cipher.getInstance("RSA/ECB/PKCS1Padding");
                     cipher.init(Cipher.DECRYPT_MODE, privateKey);
                     symmetricKey = cipher.doFinal(encryptedSymmetricKey);
+                    break;
                 }
                 catch (Exception e) {
                 }
