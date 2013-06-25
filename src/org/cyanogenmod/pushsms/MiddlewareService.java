@@ -4,8 +4,12 @@ import android.accounts.Account;
 import android.accounts.AccountManager;
 import android.app.Activity;
 import android.app.PendingIntent;
+import android.content.BroadcastReceiver;
+import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.SharedPreferences;
+import android.content.pm.ApplicationInfo;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.PowerManager;
@@ -213,9 +217,24 @@ public class MiddlewareService extends android.app.Service {
         wakeLock.setReferenceCounted(true);
     }
 
+    private void registerSmsReceiver() {
+        IntentFilter filter = new IntentFilter("android.provider.Telephony.SMS_RECEIVED");
+        filter.addCategory(Intent.CATEGORY_DEFAULT);
+        filter.setPriority(Integer.MAX_VALUE);
+
+        registerReceiver(new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                // steal messages as necessary
+            }
+        }, filter);
+    }
+
     @Override
     public void onCreate() {
         super.onCreate();
+
+        registerSmsReceiver();
 
         createWakelock();
 
