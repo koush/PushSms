@@ -20,6 +20,7 @@ import com.koushikdutta.ion.Ion;
 
 import org.cyanogenmod.pushsms.Registration;
 import org.cyanogenmod.pushsms.bencode.BEncodedDictionary;
+import org.cyanogenmod.pushsms.bencode.BEncodedList;
 
 import java.math.BigInteger;
 import java.nio.ByteBuffer;
@@ -97,16 +98,29 @@ public class GcmSocket extends FilteredDataEmitter implements AsyncSocket {
             // and the corresponding encryptedSignedMessage
             BEncodedDictionary encryptedKeyMessagePair = BEncodedDictionary.parseDictionary(Base64.decode(dataString, Base64.NO_WRAP));
 
-            byte[] encryptedSymmetricKey = encryptedKeyMessagePair.getBytes("esk");
+            BEncodedList encryptedSymmetricKeys = encryptedKeyMessagePair.getBEncodedList("esk");
             byte[] encryptedSignedMessage = encryptedKeyMessagePair.getBytes("esm");
 
-            // decrypt the symmetric key
-            Cipher cipher = Cipher.getInstance("RSA/ECB/PKCS1Padding");
-            cipher.init(Cipher.DECRYPT_MODE, privateKey);
-            byte[] symmetricKey = cipher.doFinal(encryptedSymmetricKey);
+            // to support multi recipient scenarios, the protocol sends an array
+            // of encrypted symmetric keys. each key is encrypted once per intended recipient.
+            // attempt to decode all of them, use the one that works.
+            byte[] symmetricKey = null;
+            for (int i = 0; i < encryptedSymmetricKeys.size(); i++) {
+                try {
+                    byte[] encryptedSymmetricKey = encryptedSymmetricKeys.getBytes(i);
+                    // decrypt the symmetric key
+                    Cipher cipher = Cipher.getInstance("RSA/ECB/PKCS1Padding");
+                    cipher.init(Cipher.DECRYPT_MODE, privateKey);
+                    symmetricKey = cipher.doFinal(encryptedSymmetricKey);
+                }
+                catch (Exception e) {
+                }
+            }
+            if (symmetricKey == null)
+                throw new Exception("could not decrypt symmetric key");
 
             // decrypt the message
-            cipher = Cipher.getInstance("AES");
+            Cipher cipher = Cipher.getInstance("AES");
             cipher.init(Cipher.DECRYPT_MODE, new SecretKeySpec(symmetricKey, "AES"));
             BEncodedDictionary signedMessage = BEncodedDictionary.parseDictionary(cipher.doFinal(encryptedSignedMessage));
 
@@ -185,10 +199,12 @@ public class GcmSocket extends FilteredDataEmitter implements AsyncSocket {
             signedMessage.put("d", signedEnvelope);
             signedMessage.put("s", signature);
 
-            // generate an symmetric key to be encrypted with the remote public key,
+            // generate a symmetric key to be encrypted by the remote public key,
             // and encrypt that. Asymmetric keys have payload limitations.
             // http://en.wikipedia.org/wiki/Hybrid_cryptosystem
             // http://stackoverflow.com/questions/6788018/android-encryption-decryption-with-aes
+            // see also the added benefit of multi recipient scenarios:
+            // http://security.stackexchange.com/questions/20134/in-pgp-why-not-just-encrypt-message-with-recipients-public-key-why-the-meta-e/20145#20145
             KeyGenerator keyGenerator = KeyGenerator.getInstance("AES");
             SecureRandom secureRandom = SecureRandom.getInstance("SHA1PRNG");
             secureRandom.setSeed(new BigInteger(256, new Random()).toByteArray());
@@ -209,7 +225,12 @@ public class GcmSocket extends FilteredDataEmitter implements AsyncSocket {
 
             // put the encrypted symmetric key and encrypted payload into the JSON, and send it off
             BEncodedDictionary payload = new BEncodedDictionary();
-            payload.put("esk", encryptedSymmetricKey);
+            // though right now we only put in a single encrypted symmetric key,
+            // wrap that key in an array. this will future proof the protocol
+            // for later possible multi recipient scenarios.
+            BEncodedList encryptedSymmetricKeys = new BEncodedList();
+            encryptedSymmetricKeys.add(encryptedSymmetricKey);
+            payload.put("esk", encryptedSymmetricKeys);
             payload.put("esm", encryptedSignedMessage);
 
             // now base64 the entire encrypted payload

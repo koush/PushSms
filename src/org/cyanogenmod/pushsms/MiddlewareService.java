@@ -344,6 +344,8 @@ public class MiddlewareService extends android.app.Service {
                 }
             }
 
+            // create a future that will provide the registration id of the destination
+            // if it exists
             RegistrationFuture future = findOrCreateRegistration(destAddr);
 
             // construct a text that we can attempt to send,
@@ -356,6 +358,9 @@ public class MiddlewareService extends android.app.Service {
             sendText.deliveryIntents = deliveryIntents;
             sendText.sentIntents = sentIntents;
 
+            // put this message in the pending ack queue, and set a timeout
+            // to resend the message via the regular sms transport if no
+            // ack is received.
             messagesAwaitingAck.put(lookupFinal, sendText);
             handler.postDelayed(new Runnable() {
                 @Override
@@ -375,6 +380,8 @@ public class MiddlewareService extends android.app.Service {
                 }
             }, ACK_TIMEOUT);
 
+            // wait for the registration result, and set up a peer to peer
+            // gcm connection if possible
             future.addCallback(new FutureCallback<Registration>() {
                 @Override
                 public void onCompleted(Exception e, Registration result) {
@@ -383,6 +390,7 @@ public class MiddlewareService extends android.app.Service {
                         return;
                     }
 
+                    // create a gcm connection with the peer and send a text
                     sendText.send(findOrCreateGcmSocket(result), lookupFinal);
                 }
             });
@@ -412,7 +420,7 @@ public class MiddlewareService extends android.app.Service {
             String messageType = message.getString("t");
 
             if (MessageTypes.MESSAGE.equals(messageType)) {
-                // incoming text
+                // incoming text via gcm
                 GcmText gcmText = GcmText.parse(gcmSocket, message);
                 if (gcmText == null)
                     return;
@@ -521,6 +529,8 @@ public class MiddlewareService extends android.app.Service {
                 Registration registration;
                 boolean wasUnregistered = false;
                 String oldRegistrationId = null;
+                // if we're reregistering/refreshing, grab the relevant bits
+                // from the old registration
                 if (existing != null) {
                     oldRegistrationId = existing.registrationId;
                     wasUnregistered = existing.isUnregistered();
@@ -533,8 +543,15 @@ public class MiddlewareService extends android.app.Service {
                 }
 
                 try {
-                    if (e != null)
+                    if (e != null) {
+                        // this throws down to the catch that marks
+                        // the registration as invalid willy nilly..
+                        // this is probably bad. errors here are
+                        // potentially caused by server failures
+                        // or lack of network access on the phone, etc.
                         throw e;
+                    }
+
                     if (result.has("error"))
                         throw new Exception(result.toString());
 
@@ -552,6 +569,9 @@ public class MiddlewareService extends android.app.Service {
 
                     logd("Registration complete for " + registration.endpoint);
 
+                    // if we're refreshing a NotRegistered event, and get the same registration...
+                    // just mark the peer as invalid, until they gcm us back or the refresh interval
+                    // gets hit.
                     if (wasUnregistered && TextUtils.equals(newRegistrationId, oldRegistrationId))
                         throw new Exception("unregistered registration was refreshed, still invalid");
                 }
@@ -563,6 +583,8 @@ public class MiddlewareService extends android.app.Service {
                 registry.register(address, registration);
                 ret.setComplete(registration);
 
+                // remove any older gcm connections to force creation of a new one
+                // that will leverage the new registration id and potentially public key
                 if (gcmConnectionManager != null)
                     gcmConnectionManager.remove(address);
             }
