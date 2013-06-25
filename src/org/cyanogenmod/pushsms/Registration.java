@@ -28,15 +28,20 @@ public class Registration {
     public int state = STATE_REGISTERED;
 
     public boolean isRegistered() {
-        return state == STATE_REGISTERED;
+        return state == STATE_REGISTERED && !isRefresh();
     }
 
     public boolean isUnregistered() {
-        return state == STATE_UNREGISTERED;
+        return state == STATE_UNREGISTERED && !isRefresh();
     }
 
     public boolean isInvalid() {
-        return state == STATE_INVALID;
+        return state == STATE_INVALID && !isRefresh();
+    }
+
+    public void register() {
+        date = System.currentTimeMillis();
+        state = STATE_REGISTERED;
     }
 
     public void invalidate() {
@@ -49,6 +54,12 @@ public class Registration {
 
     public void refresh() {
         state = STATE_NEEDS_REFRESH;
+    }
+
+    // force a refresh every 3 days, regardless of status
+    public static final long REFRESH_INTERVAL = 3L * 24L * 60L * 60L * 1000L;
+    public boolean isRefresh() {
+        return state == STATE_NEEDS_REFRESH || date < System.currentTimeMillis() - REFRESH_INTERVAL;
     }
 
     static Registration parse(String data) {

@@ -524,7 +524,20 @@ public class MiddlewareService extends android.app.Service {
         .asJsonObject().setCallback(new FutureCallback<JsonObject>() {
             @Override
             public void onCompleted(Exception e, JsonObject result) {
-                Registration registration = new Registration();
+                Registration registration;
+                boolean wasUnregistered = false;
+                String oldRegistrationId = null;
+                if (existing != null) {
+                    oldRegistrationId = existing.registrationId;
+                    wasUnregistered = existing.isUnregistered();
+                    // reuse the existing registration to preserve sequence numbers, etc.
+                    registration = existing;
+                    registration.register();
+                }
+                else {
+                    registration = new Registration();
+                }
+
                 try {
                     if (e != null)
                         throw e;
@@ -545,7 +558,7 @@ public class MiddlewareService extends android.app.Service {
 
                     logd("Registration complete for " + registration.endpoint);
 
-                    if (existing != null && existing.isUnregistered() && TextUtils.equals(newRegistrationId, existing.registrationId))
+                    if (wasUnregistered && TextUtils.equals(newRegistrationId, oldRegistrationId))
                         throw new Exception("unregistered registration was refreshed, still invalid");
                 }
                 catch (Exception ex) {
