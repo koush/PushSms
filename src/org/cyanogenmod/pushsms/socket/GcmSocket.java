@@ -43,16 +43,12 @@ public class GcmSocket extends FilteredDataEmitter implements AsyncSocket {
     AsyncServer server;
     Context context;
     public Registration registration;
-    PrivateKey privateKey;
-    String from;
-    String gcmApiKey;
-    public GcmSocket(Context context, AsyncServer server, PrivateKey privateKey, String from, String gcmApiKey, Registration registration) {
+    GcmConnectionManager gcmConnectionManager;
+    public GcmSocket(Context context, AsyncServer server, GcmConnectionManager gcmConnectionManager, Registration registration) {
         this.server = server;
         this.context = context;
         this.registration = registration;
-        this.privateKey = privateKey;
-        this.from = from;
-        this.gcmApiKey = gcmApiKey;
+        this.gcmConnectionManager = gcmConnectionManager;
     }
 
     public String getNumber() {
@@ -110,7 +106,7 @@ public class GcmSocket extends FilteredDataEmitter implements AsyncSocket {
                     byte[] encryptedSymmetricKey = encryptedSymmetricKeys.getBytes(i);
                     // decrypt the symmetric key
                     Cipher cipher = Cipher.getInstance("RSA/ECB/PKCS1Padding");
-                    cipher.init(Cipher.DECRYPT_MODE, privateKey);
+                    cipher.init(Cipher.DECRYPT_MODE, gcmConnectionManager.privateKey);
                     symmetricKey = cipher.doFinal(encryptedSymmetricKey);
                     break;
                 }
@@ -193,7 +189,7 @@ public class GcmSocket extends FilteredDataEmitter implements AsyncSocket {
             byte[] signedEnvelope = envelope.toByteArray();
 
             Signature signer = Signature.getInstance("SHA1withRSA");
-            signer.initSign(privateKey);
+            signer.initSign(gcmConnectionManager.privateKey);
             signer.update(signedEnvelope);
             byte[] signature = signer.sign();
 
@@ -238,12 +234,12 @@ public class GcmSocket extends FilteredDataEmitter implements AsyncSocket {
             data.add("p", new JsonPrimitive(Base64.encodeToString(payload.toByteArray(), Base64.NO_WRAP)));
 
             // include our claimed number, as we would a text, so the other end can find us
-            data.addProperty("f", from);
+            data.addProperty("f", gcmConnectionManager.from);
 
             // ship it
             Ion.with(context)
             .load("https://android.googleapis.com/gcm/send")
-            .setHeader("Authorization", "key=" + gcmApiKey)
+            .setHeader("Authorization", "key=" + gcmConnectionManager.gcmApiKey)
             .setJsonObjectBody(post)
             .as(GcmResults.class)
             .setCallback(new FutureCallback<GcmResults>() {

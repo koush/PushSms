@@ -17,19 +17,33 @@ public class GcmConnectionManager {
     Context context;
     PrivateKey privateKey;
     String gcmApiKey;
+    String from;
 
-    public GcmConnectionManager(Context context, PrivateKey privateKey, String gcmApiKey) {
-        this.context = context;
-        this.privateKey = privateKey;
+    public void setFrom(String from) {
+        this.from = from;
+    }
+
+    public String getFrom() {
+        return  from;
+    }
+
+    public String getGcmApiKey() {
+        return gcmApiKey;
+    }
+
+    public void setGcmApiKey(String gcmApiKey) {
         this.gcmApiKey = gcmApiKey;
     }
 
+    public GcmConnectionManager(Context context, PrivateKey privateKey, String gcmApiKey, String from) {
+        this.context = context;
+        this.privateKey = privateKey;
+        this.gcmApiKey = gcmApiKey;
+        this.from = from;
+    }
+
     public GcmSocket findGcmSocket(Registration registration, String from) {
-        GcmSocket gcmSocket = findGcmSocket(registration.endpoint);
-        if (gcmSocket == null)
-            return null;
-        gcmSocket.from = from;
-        return gcmSocket;
+        return findGcmSocket(registration.endpoint);
     }
 
     public GcmSocket findGcmSocket(String number) {
@@ -49,7 +63,7 @@ public class GcmConnectionManager {
     }
 
     public GcmSocket createGcmSocket(Registration registration, String from) {
-        GcmSocket ret = new GcmSocket(context, Ion.getDefault(context).getServer(), privateKey, from, gcmApiKey, registration);
+        GcmSocket ret = new GcmSocket(context, Ion.getDefault(context).getServer(), this, registration);
         gcmSockets.add(ret);
         return ret;
     }

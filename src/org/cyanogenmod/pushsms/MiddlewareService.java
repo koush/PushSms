@@ -9,7 +9,6 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
-import android.content.pm.ApplicationInfo;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.PowerManager;
@@ -77,7 +76,6 @@ public class MiddlewareService extends android.app.Service {
     private SharedPreferences accounts;
     private KeyPair keyPair;
     private RSAPublicKeySpec rsaPublicKeySpec;
-    private String gcmApiKey;
     private String gcmSenderId;
     private GcmConnectionManager gcmConnectionManager;
     private Hashtable<String, GcmText> messagesAwaitingAck = new Hashtable<String, GcmText>();
@@ -101,7 +99,8 @@ public class MiddlewareService extends android.app.Service {
                     .get();
 
                     gcmSenderId = result.get("sender_id").getAsString();
-                    gcmApiKey = result.get("api_key").getAsString();
+                    String gcmApiKey = result.get("api_key").getAsString();
+                    gcmConnectionManager.setGcmApiKey(gcmApiKey);
                     settings.edit()
                     .putString("gcm_sender_id", gcmSenderId)
                     .putString("gcm_api_key", gcmApiKey)
@@ -196,18 +195,9 @@ public class MiddlewareService extends android.app.Service {
             settings.edit().putBoolean("needs_register", true).commit();
         }
         catch (Exception e) {
-            Log.e(LOGTAG, "KeyPair generation error", e);
+            Log.wtf(LOGTAG, "KeyPair generation error", e);
             keyPair = null;
         }
-    }
-
-    private void setupGcmConnectionManager() {
-        selfRegistrationFuture.addCallback(new FutureCallback<Registration>() {
-            @Override
-            public void onCompleted(Exception e, Registration result) {
-                gcmConnectionManager = new GcmConnectionManager(MiddlewareService.this, keyPair.getPrivate(), gcmApiKey);
-            }
-        });
     }
 
     PowerManager.WakeLock wakeLock;
@@ -242,10 +232,9 @@ public class MiddlewareService extends android.app.Service {
         getOrCreateKeyPair();
 
         gcm = GoogleCloudMessaging.getInstance(MiddlewareService.this);
-        gcmApiKey = settings.getString("gcm_api_key", null);
+        gcmConnectionManager = new GcmConnectionManager(MiddlewareService.this, keyPair.getPrivate(), settings.getString("gcm_api_key", null), getNumber());
         gcmSenderId = settings.getString("gcm_sender_id", "494395756847");
         getGcmInfo();
-        setupGcmConnectionManager();
 
         registerSmsMiddleware();
 
@@ -297,7 +286,7 @@ public class MiddlewareService extends android.app.Service {
                 return false;
             }
 
-            if (gcmConnectionManager == null) {
+            if (gcmConnectionManager == null || gcmConnectionManager.getGcmApiKey() == null) {
                 logd("no gcm connection manager available");
                 return false;
             }
@@ -723,6 +712,7 @@ public class MiddlewareService extends android.app.Service {
                 registering = false;
                 if (e != null || result.has("error"))
                     return;
+                gcmConnectionManager.setFrom(registration.endpoint);
                 settings.edit().putBoolean("needs_register", false).commit();
             }
         });
