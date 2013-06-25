@@ -235,14 +235,10 @@ public class MiddlewareService extends android.app.Service {
         super.onCreate();
 
         registerSmsReceiver();
-
         createWakelock();
-
         settings = getSharedPreferences("settings", MODE_PRIVATE);
         accounts = getSharedPreferences("accounts", MODE_PRIVATE);
-
         smsManager = SmsManager.getDefault();
-
         getOrCreateKeyPair();
 
         gcm = GoogleCloudMessaging.getInstance(MiddlewareService.this);
