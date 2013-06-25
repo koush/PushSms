@@ -328,29 +328,23 @@ public class MiddlewareService extends android.app.Service {
                 return false;
             }
 
-            RegistrationFuture future = findOrCreateRegistration(destAddr);
-
             // try to fail out synchronously by verifying
             // that the registration is invalid or the gcm socket is unhealthy
-            if (future.isDone()) {
-                try {
-                    Registration existing = future.get();
-                    if (existing.isInvalid()) {
-                        logd("invalid registration");
-                        return false;
-                    }
-
-                    GcmSocket gcmSocket = gcmConnectionManager.findGcmSocket(existing, getNumber());
-                    if (gcmSocket != null && !gcmSocket.isHealthy()) {
-                        logd("unhealthy gcm socket");
-                        return false;
-                    }
+            Registration existingResolved = findImmediateRegistration(destAddr);
+            if (existingResolved != null) {
+                if (existingResolved.isInvalid()) {
+                    logd("invalid registration");
+                    return false;
                 }
-                catch (Exception e) {
-                    Log.e(LOGTAG, "unexpected exception checking future?", e);
+
+                GcmSocket gcmSocket = gcmConnectionManager.findGcmSocket(existingResolved, getNumber());
+                if (gcmSocket != null && !gcmSocket.isHealthy()) {
+                    logd("unhealthy gcm socket");
                     return false;
                 }
             }
+
+            RegistrationFuture future = findOrCreateRegistration(destAddr);
 
             // construct a text that we can attempt to send,
             // once we determine how to reach the number
@@ -587,6 +581,20 @@ public class MiddlewareService extends android.app.Service {
         return null;
     }
 
+    private Registration findImmediateRegistration(String address) {
+        RegistrationFuture future = findRegistration(address);
+
+        if (future != null) {
+            try {
+                if (future.isDone())
+                    return future.get();
+            }
+            catch (Exception e) {
+            }
+        }
+        return null;
+    }
+
     private RegistrationFuture findOrCreateRegistration(String address) {
         RegistrationFuture future = findRegistration(address);
 
@@ -627,10 +635,9 @@ public class MiddlewareService extends android.app.Service {
 
                 // if we get a message from a number that we previously thought
                 // was not in commission, force a refresh to get the new info, if any.
-                if (gcmConnectionManager != null) {
-                    GcmSocket existing = gcmConnectionManager.findGcmSocket(from);
-                    if (existing != null && existing.registration.isInvalid())
-                        existing.registration.refresh();
+                Registration existingRegistration = findImmediateRegistration(from);
+                if (existingRegistration != null && existingRegistration.isInvalid()) {
+                    existingRegistration.refresh();
                 }
 
                 findOrCreateRegistration(from)
