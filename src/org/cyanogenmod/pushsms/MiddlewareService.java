@@ -200,13 +200,6 @@ public class MiddlewareService extends android.app.Service {
         }
     }
 
-    PowerManager.WakeLock wakeLock;
-    private void createWakelock() {
-        PowerManager pm = (PowerManager)getSystemService(POWER_SERVICE);
-        wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "SMSDispatcher");
-        wakeLock.setReferenceCounted(true);
-    }
-
     private void registerSmsReceiver() {
         IntentFilter filter = new IntentFilter("android.provider.Telephony.SMS_RECEIVED");
         filter.addCategory(Intent.CATEGORY_DEFAULT);
@@ -225,7 +218,6 @@ public class MiddlewareService extends android.app.Service {
         super.onCreate();
 
         registerSmsReceiver();
-        createWakelock();
         settings = getSharedPreferences("settings", MODE_PRIVATE);
         accounts = getSharedPreferences("accounts", MODE_PRIVATE);
         smsManager = SmsManager.getDefault();
@@ -322,7 +314,7 @@ public class MiddlewareService extends android.app.Service {
                     return false;
                 }
 
-                GcmSocket gcmSocket = gcmConnectionManager.findGcmSocket(existingResolved, getNumber());
+                GcmSocket gcmSocket = gcmConnectionManager.findGcmSocket(existingResolved);
                 if (gcmSocket != null && !gcmSocket.isHealthy()) {
                     logd("unhealthy gcm socket");
                     return false;
@@ -442,7 +434,7 @@ public class MiddlewareService extends android.app.Service {
     // given a registration, find/create the gcm socket that manages
     // the secure connection between the two devices.
     private GcmSocket findOrCreateGcmSocket(Registration registration) {
-        GcmSocket ret = gcmConnectionManager.findGcmSocket(registration, getNumber());
+        GcmSocket ret = gcmConnectionManager.findGcmSocket(registration);
         if (ret == null) {
             final GcmSocket gcmSocket = ret = gcmConnectionManager.createGcmSocket(registration, getNumber());
 
@@ -489,7 +481,7 @@ public class MiddlewareService extends android.app.Service {
         // to locate the gcm registration id for a given number.
         // this will return HASHED emails, not actual emails. this way the server is not privy
         // to your contact information.
-        HashSet<String> emailHash = Helper.findEmailsForNumber(this, address);
+        HashSet<String> emailHash = Helper.getEmailHashesForNumber(this, address);
         if (emailHash.size() == 0) {
             ret.setComplete(new Exception("no emails"));
             return ret;
@@ -632,7 +624,7 @@ public class MiddlewareService extends android.app.Service {
 
         if ("com.google.android.c2dm.intent.RECEIVE".equals(intent.getAction())) {
             // keep us alive for 10 seconds to ack any incoming message
-            wakeLock.acquire(10000);
+            Helper.acquireTemporaryWakelocks(this, 10000);
             String messageType = gcm.getMessageType(intent);
             if (GoogleCloudMessaging.MESSAGE_TYPE_MESSAGE.equals(messageType)) {
                 final String payload = intent.getStringExtra("p");

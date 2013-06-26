@@ -8,10 +8,10 @@ import android.os.PowerManager;
 /**
  * Created by koush on 6/18/13.
  */
-public class SmsReceiver extends ReceiverBase {
+public class SmsReceiver extends BroadcastReceiver {
     @Override
     public void onReceive(Context context, Intent intent) {
-        createWakelock(context).acquire(10000);
+        Helper.acquireTemporaryWakelocks(context, 10000);
         intent.setClass(context, MiddlewareService.class);
         context.startService(intent);
     }

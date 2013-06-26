@@ -42,7 +42,7 @@ public class GcmConnectionManager {
         this.from = from;
     }
 
-    public GcmSocket findGcmSocket(Registration registration, String from) {
+    public GcmSocket findGcmSocket(Registration registration) {
         return findGcmSocket(registration.endpoint);
     }
 
