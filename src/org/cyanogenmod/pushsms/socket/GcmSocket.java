@@ -203,8 +203,7 @@ public class GcmSocket extends FilteredDataEmitter implements AsyncSocket {
             // see also the added benefit of multi recipient scenarios:
             // http://security.stackexchange.com/questions/20134/in-pgp-why-not-just-encrypt-message-with-recipients-public-key-why-the-meta-e/20145#20145
             KeyGenerator keyGenerator = KeyGenerator.getInstance("AES");
-            SecureRandom secureRandom = SecureRandom.getInstance("SHA1PRNG");
-            secureRandom.setSeed(new BigInteger(256, new Random()).toByteArray());
+            SecureRandom secureRandom = new SecureRandom();
             keyGenerator.init(128, secureRandom);
             byte[] symmetricKey = keyGenerator.generateKey().getEncoded();
 
