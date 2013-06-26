@@ -116,7 +116,6 @@ public class MiddlewareService extends android.app.Service {
                         Registration self = new Registration();
                         self.registrationId = r;
                         selfRegistrationFuture.setComplete(self);
-//                    numberToRegistration.put("2064951490", selfRegistrationFuture);
                         Log.i(LOGTAG, "Registration ID: " + r);
                         break;
                     } catch (IOException e) {
